@@ -28,5 +28,5 @@ def test_heuristic_bundle_supports_offline_llm_mode():
     assert bundle.config.llm_supervisor is True
 
 
-def test_default_supervisor_model_is_low_memory_qwen():
-    assert DEFAULT_OLLAMA_SUPERVISOR_MODEL == "qwen3:1.7b"
+def test_default_supervisor_model_is_qwen_4b():
+    assert DEFAULT_OLLAMA_SUPERVISOR_MODEL == "qwen3:4b"

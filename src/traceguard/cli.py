@@ -206,6 +206,8 @@ def _experiment(args: argparse.Namespace) -> int:
         supervisor_provider=args.supervisor_provider,
         supervisor_model=args.supervisor_model,
         supervisor_url=args.supervisor_url,
+        gemini_api_key=getattr(args, "gemini_api_key", None),
+        gemini_base_url=getattr(args, "gemini_base_url", None),
         timeout=args.supervisor_timeout,
         supervisor_max_retries=args.supervisor_max_retries,
         supervisor_confidence_threshold=args.supervisor_confidence_threshold,
@@ -325,6 +327,38 @@ def _demo(args: argparse.Namespace) -> int:
     )
     print(f"  Full sanitized traces        : {run_dir}")
 
+    if getattr(args, "ollama", False):
+        model = (
+            getattr(args, "ollama_model", None)
+            or os.getenv("TRACEGUARD_OLLAMA_MODEL")
+            or "qwen3:4b"
+        )
+        ollama_url = getattr(args, "ollama_url", "http://127.0.0.1:11434")
+        live_results, _, live_run_dir = run_experiment(
+            cases=[cases_by_id["benign_math_dev"]],
+            ablations={"A7_ollama_live": all_ablations["A7"]},
+            seed=args.seed,
+            artifacts_dir=(args.artifacts or (root / "artifacts")).resolve(),
+            split="dev",
+            cases_path=default_cases_path(),
+            agent_provider="ollama",
+            agent_model=model,
+            agent_url=ollama_url,
+            supervisor_provider="ollama",
+            supervisor_model=model,
+            supervisor_url=ollama_url,
+        )
+        live = live_results[0]
+        print("\nOLLAMA LIVE CHECK")
+        print("-----------------")
+        print(f"  model        : {model}")
+        print(f"  url          : {ollama_url}")
+        print(f"  utility      : {'PASS' if live.utility_passed else 'FAIL'}")
+        print(f"  security     : {'PASS' if live.security_passed else 'FAIL'}")
+        print(f"  trace output : {live_run_dir}")
+        if not (live.utility_passed and live.security_passed):
+            return 1
+
     if not args.gemini:
         print("\nGemini live call skipped (add --gemini after configuring GEMINI_API_KEY).")
         return 0
@@ -344,11 +378,15 @@ def _demo(args: argparse.Namespace) -> int:
         agent_model=model,
         supervisor_provider="gemini",
         supervisor_model=model,
+        gemini_api_key=os.getenv("GEMINI_API_KEY"),
+        gemini_base_url=getattr(args, "gemini_base_url", None),
     )
     live = live_results[0]
     print("\nGEMINI LIVE CHECK")
     print("-----------------")
     print(f"  model        : {model}")
+    base_url = getattr(args, "gemini_base_url", None) or os.getenv("GEMINI_BASE_URL") or "default"
+    print(f"  base url     : {base_url}")
     print(f"  utility      : {'PASS' if live.utility_passed else 'FAIL'}")
     print(f"  security     : {'PASS' if live.security_passed else 'FAIL'}")
     print(f"  trace output : {live_run_dir}")
@@ -573,6 +611,14 @@ def main(argv: list[str] | None = None) -> int:
         help="also run one live Gemini agent and supervisor episode",
     )
     demo.add_argument("--gemini-model", default=None)
+    demo.add_argument("--gemini-base-url", default=None)
+    demo.add_argument(
+        "--ollama",
+        action="store_true",
+        help="also run one live Ollama/Qwen agent and supervisor episode",
+    )
+    demo.add_argument("--ollama-model", default=None)
+    demo.add_argument("--ollama-url", default="http://127.0.0.1:11434")
 
     experiment = subparsers.add_parser(
         "experiment",
@@ -601,6 +647,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     experiment.add_argument("--supervisor-model", default=None)
     experiment.add_argument("--supervisor-url", default=None)
+    experiment.add_argument("--gemini-api-key", default=None)
+    experiment.add_argument("--gemini-base-url", default=None)
     experiment.add_argument("--supervisor-timeout", type=float, default=60.0)
     experiment.add_argument("--supervisor-max-retries", type=int, default=2)
     experiment.add_argument("--supervisor-confidence-threshold", type=float, default=0.55)

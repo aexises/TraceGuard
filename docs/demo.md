@@ -17,6 +17,7 @@ Keep the Gemini key outside the camera frame and shell history:
 ```bash
 read -s GEMINI_API_KEY
 export GEMINI_API_KEY
+export GEMINI_BASE_URL=https://open.blackroute.space/v1
 ```
 
 ## 1. Introduce the architecture (30 seconds)
@@ -31,7 +32,7 @@ Show `README.md` and say:
 ## 2. Run the visible comparison (90 seconds)
 
 ```bash
-python -m traceguard demo --gemini
+python -m traceguard demo --gemini --gemini-base-url "$GEMINI_BASE_URL"
 ```
 
 Narrate three things visible in the terminal:

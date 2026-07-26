@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import time
 import urllib.error
@@ -92,13 +93,40 @@ class GeminiTransport(Protocol):
     ) -> dict[str, Any]: ...
 
 
+def gemini_base_url_from_env(base_url: str | None = None) -> str | None:
+    return base_url or os.getenv("GEMINI_BASE_URL") or None
+
+
+def gemini_transport_kind(base_url: str | None = None) -> str:
+    configured = os.getenv("TRACEGUARD_GEMINI_TRANSPORT", "auto").strip().casefold()
+    if configured not in {"auto", "google", "openai"}:
+        raise SupervisorTransportError(
+            "TRACEGUARD_GEMINI_TRANSPORT must be auto, google, or openai",
+            retryable=False,
+        )
+    if configured != "auto":
+        return configured
+    actual_base_url = gemini_base_url_from_env(base_url)
+    return "openai" if actual_base_url else "google"
+
+
+def build_gemini_transport(
+    *,
+    api_key: str | None = None,
+    base_url: str | None = None,
+) -> GeminiTransport:
+    actual_base_url = gemini_base_url_from_env(base_url)
+    if gemini_transport_kind(actual_base_url) == "openai":
+        return OpenAICompatibleGeminiTransport(api_key=api_key, base_url=actual_base_url)
+    return GoogleGenAITransport(api_key=api_key, base_url=actual_base_url)
+
+
 class GoogleGenAITransport:
     """Production Gemini transport using the optional google-genai dependency."""
 
-    def __init__(self, api_key: str | None = None) -> None:
-        import os
-
+    def __init__(self, api_key: str | None = None, base_url: str | None = None) -> None:
         self.api_key = api_key or os.getenv("GEMINI_API_KEY")
+        self.base_url = gemini_base_url_from_env(base_url)
 
     def generate_json(
         self,
@@ -121,7 +149,12 @@ class GoogleGenAITransport:
         try:
             client = genai.Client(
                 api_key=self.api_key,
-                http_options=types.HttpOptions(timeout=max(1, int(timeout * 1000))),
+                http_options=types.HttpOptions(
+                    base_url=self.base_url,
+                    timeout=max(1, int(timeout * 1000)),
+                    client_args={"trust_env": False},
+                    async_client_args={"trust_env": False},
+                ),
             )
             response = client.models.generate_content(
                 model=model,
@@ -155,6 +188,83 @@ class GoogleGenAITransport:
             retryable = status in {408, 429, 500, 502, 503, 504} or isinstance(exc, TimeoutError)
             raise SupervisorTransportError(
                 f"Gemini request failed: {type(exc).__name__}", retryable=retryable
+            ) from exc
+
+
+class OpenAICompatibleGeminiTransport:
+    """Gemini-compatible transport for OpenAI-style gateways such as BlackRoute."""
+
+    def __init__(self, api_key: str | None = None, base_url: str | None = None) -> None:
+        self.api_key = api_key or os.getenv("GEMINI_API_KEY")
+        self.base_url = gemini_base_url_from_env(base_url)
+
+    def generate_json(
+        self,
+        *,
+        model: str,
+        system: str,
+        prompt: str,
+        timeout: float,
+        response_schema: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        if not self.api_key:
+            raise SupervisorTransportError("GEMINI_API_KEY is not configured", retryable=False)
+        if not self.base_url:
+            raise SupervisorTransportError("GEMINI_BASE_URL is not configured", retryable=False)
+        try:
+            import httpx
+            import openai
+        except ImportError as exc:
+            raise SupervisorTransportError(
+                "install TraceGuard with the 'gemini' extra", retryable=False
+            ) from exc
+        try:
+            client = openai.OpenAI(
+                api_key=self.api_key,
+                base_url=self.base_url,
+                timeout=timeout,
+                max_retries=0,
+                http_client=httpx.Client(trust_env=False),
+            )
+            schema = response_schema or SUPERVISOR_RESPONSE_JSON_SCHEMA
+            completion = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            f"{system}\n\nReturn only valid JSON matching this schema: "
+                            f"{json.dumps(schema, sort_keys=True)}"
+                        ),
+                    },
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0,
+                response_format={"type": "json_object"},
+            )
+            content = completion.choices[0].message.content
+            if not isinstance(content, str) or not content.strip():
+                raise SupervisorSchemaError("empty OpenAI-compatible Gemini response")
+            parsed = json.loads(content)
+            if not isinstance(parsed, dict):
+                raise SupervisorSchemaError("OpenAI-compatible Gemini response is not an object")
+            usage = getattr(completion, "usage", None)
+            if usage is not None:
+                parsed[_PROVIDER_METADATA_KEY] = {
+                    "prompt_eval_count": getattr(usage, "prompt_tokens", None),
+                    "eval_count": getattr(usage, "completion_tokens", None),
+                }
+            return parsed
+        except SupervisorProviderError:
+            raise
+        except json.JSONDecodeError as exc:
+            raise SupervisorSchemaError("OpenAI-compatible Gemini returned malformed JSON") from exc
+        except Exception as exc:
+            status = getattr(exc, "status_code", None) or getattr(exc, "code", None)
+            retryable = status in {408, 429, 500, 502, 503, 504} or isinstance(exc, TimeoutError)
+            raise SupervisorTransportError(
+                f"OpenAI-compatible Gemini request failed: {type(exc).__name__}",
+                retryable=retryable,
             ) from exc
 
 
@@ -225,6 +335,46 @@ POST_RUN_RESPONSE_JSON_SCHEMA = {
 _PROVIDER_METADATA_KEY = "_traceguard_provider_metadata"
 
 
+def _validate_supervisor_response_payload(payload: Any, *, message: str) -> SupervisorResponse:
+    try:
+        return SupervisorResponse.model_validate(payload)
+    except ValidationError as original:
+        if not isinstance(payload, Mapping):
+            raise SupervisorSchemaError(message) from original
+        cleaned = {
+            key: value for key, value in payload.items() if key in SupervisorResponse.model_fields
+        }
+        if cleaned == payload:
+            raise SupervisorSchemaError(message) from original
+        try:
+            return SupervisorResponse.model_validate(cleaned)
+        except ValidationError:
+            raise SupervisorSchemaError(message) from original
+
+
+def _validate_post_run_response_payload(
+    payload: Any,
+    *,
+    message: str,
+) -> PostRunSupervisorResponse:
+    try:
+        return PostRunSupervisorResponse.model_validate(payload)
+    except ValidationError as original:
+        if not isinstance(payload, Mapping):
+            raise SupervisorSchemaError(message) from original
+        cleaned = {
+            key: value
+            for key, value in payload.items()
+            if key in PostRunSupervisorResponse.model_fields
+        }
+        if cleaned == payload:
+            raise SupervisorSchemaError(message) from original
+        try:
+            return PostRunSupervisorResponse.model_validate(cleaned)
+        except ValidationError:
+            raise SupervisorSchemaError(message) from original
+
+
 def _supervisor_response_json_schema(*, enable_rewrite: bool) -> dict[str, Any]:
     schema = json.loads(json.dumps(SUPERVISOR_RESPONSE_JSON_SCHEMA))
     schema["properties"]["decision"]["enum"] = (
@@ -273,9 +423,9 @@ class OllamaSupervisor:
     def __init__(
         self,
         *,
-        model: str = "qwen3:1.7b",
+        model: str = "qwen3:4b",
         url: str = "http://127.0.0.1:11434",
-        model_tag: str | None = "qwen3:1.7b",
+        model_tag: str | None = "qwen3:4b",
         model_digest: str | None = None,
         quantization: str | None = None,
         memory_use: str | None = None,
@@ -439,10 +589,10 @@ class OllamaSupervisor:
             payload = json.loads(content)
         except json.JSONDecodeError as exc:
             raise SupervisorSchemaError("malformed supervisor JSON") from exc
-        try:
-            return SupervisorResponse.model_validate(payload)
-        except ValidationError as exc:
-            raise SupervisorSchemaError("supervisor response failed schema validation") from exc
+        return _validate_supervisor_response_payload(
+            payload,
+            message="supervisor response failed schema validation",
+        )
 
     def _parse_post_run_response(self, raw: Mapping[str, Any]) -> PostRunSupervisorResponse:
         content = (
@@ -456,12 +606,10 @@ class OllamaSupervisor:
             payload = json.loads(content)
         except json.JSONDecodeError as exc:
             raise SupervisorSchemaError("malformed post-run supervisor JSON") from exc
-        try:
-            return PostRunSupervisorResponse.model_validate(payload)
-        except ValidationError as exc:
-            raise SupervisorSchemaError(
-                "post-run supervisor response failed schema validation"
-            ) from exc
+        return _validate_post_run_response_payload(
+            payload,
+            message="post-run supervisor response failed schema validation",
+        )
 
     def _metadata(
         self,
@@ -521,12 +669,14 @@ class GeminiSupervisor:
         *,
         model: str = "gemini-3.5-flash",
         transport: GeminiTransport | None = None,
+        api_key: str | None = None,
+        base_url: str | None = None,
         timeout: float = 60.0,
         max_transport_retries: int = 2,
         redaction_config: RedactionConfig | None = None,
     ) -> None:
         self.model = model
-        self.transport = transport or GoogleGenAITransport()
+        self.transport = transport or build_gemini_transport(api_key=api_key, base_url=base_url)
         self.timeout = timeout
         self.max_transport_retries = max_transport_retries
         self.redaction_config = mandatory_redaction_config(redaction_config)
@@ -574,10 +724,10 @@ class GeminiSupervisor:
                 retries += 1
         raw = dict(raw)
         metadata_payload = raw.pop(_PROVIDER_METADATA_KEY, {})
-        try:
-            response = SupervisorResponse.model_validate(raw)
-        except ValidationError as exc:
-            raise SupervisorSchemaError("gemini response failed schema validation") from exc
+        response = _validate_supervisor_response_payload(
+            raw,
+            message="gemini response failed schema validation",
+        )
         response.metadata = SupervisorProviderMetadata(
             provider=self.provider,
             model=self.model,
@@ -619,12 +769,10 @@ class GeminiSupervisor:
                 retries += 1
         raw = dict(raw)
         metadata_payload = raw.pop(_PROVIDER_METADATA_KEY, {})
-        try:
-            response = PostRunSupervisorResponse.model_validate(raw)
-        except ValidationError as exc:
-            raise SupervisorSchemaError(
-                "gemini post-run response failed schema validation"
-            ) from exc
+        response = _validate_post_run_response_payload(
+            raw,
+            message="gemini post-run response failed schema validation",
+        )
         response.metadata = SupervisorProviderMetadata(
             provider=self.provider,
             model=self.model,
@@ -668,7 +816,7 @@ class QwenSupervisor:
         self,
         *,
         provider: OllamaSupervisor | GeminiSupervisor | None = None,
-        model: str = "qwen3:1.7b",
+        model: str = "qwen3:4b",
         ollama_url: str = "http://127.0.0.1:11434",
         max_tokens: int = 384,
         available_tools: dict[str, dict[str, Any]] | None = None,

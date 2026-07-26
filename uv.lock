@@ -3812,6 +3812,7 @@ dev = [
 ]
 gemini = [
     { name = "google-genai" },
+    { name = "openai" },
 ]
 inspect = [
     { name = "inspect-ai" },
@@ -3827,6 +3828,7 @@ requires-dist = [
     { name = "hatchling", marker = "extra == 'dev'", specifier = ">=1.25" },
     { name = "inspect-ai", marker = "extra == 'inspect'", specifier = "==0.3.248" },
     { name = "inspect-evals", marker = "extra == 'inspect'", specifier = "==0.15.0" },
+    { name = "openai", marker = "extra == 'gemini'", specifier = ">=1.0" },
     { name = "pydantic", specifier = ">=2.7,<3" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5.0" },

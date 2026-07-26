@@ -13,7 +13,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-gemini = ["google-genai>=1.0"]
+gemini = ["google-genai>=1.0", "openai>=1.0"]
 dev = [
   "build>=1.2",
   "hatchling>=1.25",

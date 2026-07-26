@@ -30,6 +30,8 @@ def _run_custom(args: argparse.Namespace) -> int:
         config,
         provider=args.provider,
         supervisor_model=args.supervisor_model,
+        gemini_api_key=getattr(args, "gemini_api_key", None),
+        gemini_base_url=getattr(args, "gemini_base_url", None),
         timeout=args.timeout,
         max_retries=getattr(args, "supervisor_max_retries", 2),
         confidence_threshold=getattr(args, "supervisor_confidence_threshold", 0.55),
@@ -44,6 +46,7 @@ def _run_custom(args: argparse.Namespace) -> int:
             "agent_provider": getattr(args, "agent_provider", "ollama"),
             "supervisor_model": args.supervisor_model,
             "provider": args.provider,
+            "gemini_base_url": getattr(args, "gemini_base_url", None),
             "repetitions": getattr(args, "repetitions", 1),
             "seeds": [args.seed + index for index in range(getattr(args, "repetitions", 1))],
             "output_dir": str(output_dir),
@@ -69,6 +72,8 @@ def _run_custom(args: argparse.Namespace) -> int:
             supervisor_provider=args.provider,
             supervisor_model=args.supervisor_model,
             supervisor_url=args.supervisor_url,
+            gemini_api_key=getattr(args, "gemini_api_key", None),
+            gemini_base_url=getattr(args, "gemini_base_url", None),
             timeout=args.timeout,
             supervisor_max_retries=getattr(args, "supervisor_max_retries", 2),
             supervisor_confidence_threshold=getattr(args, "supervisor_confidence_threshold", 0.55),
@@ -120,6 +125,8 @@ def _run_agentdojo(args: argparse.Namespace) -> int:
             "user_tasks": args.user_task,
             "injection_tasks": args.injection_task,
             "attack": None if args.no_attack else args.attack,
+            "gemini_base_url": getattr(args, "gemini_base_url", None),
+            "camera_log_steps": getattr(args, "camera_log_steps", False),
             "repetitions": args.repetitions,
             "seeds": [args.seed + index for index in range(args.repetitions)],
             "output_dir": str(output_dir),
@@ -182,13 +189,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--suite", choices=["custom", "agentdojo"], required=True)
     parser.add_argument("--supervisor", choices=PUBLIC_MODES, required=True)
-    parser.add_argument("--agent-model", default="qwen3:1.7b")
+    parser.add_argument("--agent-model", default="qwen3:4b")
     parser.add_argument(
         "--agent-provider",
         choices=["scripted", "ollama", "gemini"],
         default="ollama",
     )
-    parser.add_argument("--supervisor-model", default="qwen3:1.7b")
+    parser.add_argument("--supervisor-model", default="qwen3:4b")
     parser.add_argument("--provider", choices=["ollama", "gemini", "heuristic"], default="ollama")
     parser.add_argument("--agentdojo-suite", default="workspace")
     parser.add_argument("--user-task", action="append", default=[])
@@ -208,11 +215,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--ollama-url", default="http://127.0.0.1:11434")
     parser.add_argument("--supervisor-url", default="http://127.0.0.1:11434")
     parser.add_argument("--gemini-api-key", default=None)
+    parser.add_argument("--gemini-base-url", default=None)
     parser.add_argument("--max-steps", type=int, default=10)
     parser.add_argument("--max-tokens", type=int, default=512)
     parser.add_argument("--format-retries", type=int, default=2)
     parser.add_argument("--repeat-retries", type=int, default=3)
     parser.add_argument("--tool-output-format", choices=["yaml", "json"], default=None)
+    parser.add_argument(
+        "--camera-log-steps",
+        action="store_true",
+        help="print redacted agent outputs and supervisor decisions live for recording",
+    )
     parser.add_argument("--supervisor-max-retries", type=int, default=2)
     parser.add_argument("--supervisor-confidence-threshold", type=float, default=0.55)
     parser.add_argument("--supervisor-enable-rewrite", action="store_true")

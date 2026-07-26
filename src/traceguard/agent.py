@@ -8,9 +8,10 @@ import urllib.error
 import urllib.request
 from typing import Any, Protocol
 
-from pydantic import Field, model_validator
+from pydantic import Field, ValidationError, model_validator
 
 from traceguard.runtime import RuntimeResult, TraceGuardRuntime, build_system_prompt
+from traceguard.supervisor.llm import gemini_base_url_from_env, gemini_transport_kind
 from traceguard.types import Observation, StrictModel, ToolCall
 
 
@@ -130,6 +131,28 @@ TASK_AGENT_RESPONSE_SCHEMA = {
     ],
     "additionalProperties": False,
 }
+TASK_AGENT_RESPONSE_FIELDS = frozenset(TASK_AGENT_RESPONSE_SCHEMA["properties"])
+
+
+def validate_task_agent_response_json(content: str) -> TaskAgentResponse:
+    try:
+        return TaskAgentResponse.model_validate_json(content)
+    except ValidationError as original:
+        try:
+            payload = json.loads(content)
+        except json.JSONDecodeError:
+            raise original from None
+        if not isinstance(payload, dict):
+            raise original
+        cleaned = {
+            key: value for key, value in payload.items() if key in TASK_AGENT_RESPONSE_FIELDS
+        }
+        if cleaned == payload:
+            raise original
+        try:
+            return TaskAgentResponse.model_validate(cleaned)
+        except ValidationError:
+            raise original from None
 
 
 class TaskAgentProvider(Protocol):
@@ -176,23 +199,43 @@ class OllamaTaskAgentProvider:
         content = raw.get("message", {}).get("content")
         if not isinstance(content, str) or not content.strip():
             raise RuntimeError("Ollama task agent returned an empty response")
-        return TaskAgentResponse.model_validate_json(content)
+        return validate_task_agent_response_json(content)
 
 
 class GeminiTaskAgentProvider:
-    def __init__(self, *, model: str, api_key: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        model: str,
+        api_key: str | None = None,
+        base_url: str | None = None,
+    ) -> None:
         self.model = model
         self.api_key = api_key or os.getenv("GEMINI_API_KEY")
+        self.base_url = gemini_base_url_from_env(base_url)
 
     def propose(self, payload: dict[str, Any]) -> TaskAgentResponse:
         if not self.api_key:
             raise RuntimeError("GEMINI_API_KEY is required for the Gemini task agent")
+        system_prompt = payload.pop("system_prompt")
+        if gemini_transport_kind(self.base_url) == "openai":
+            return self._propose_openai_compatible(system_prompt, payload)
+        return self._propose_google(system_prompt, payload)
+
+    def _propose_google(self, system_prompt: str, payload: dict[str, Any]) -> TaskAgentResponse:
         try:
             from google import genai
+            from google.genai import types as genai_types
         except ImportError as exc:
             raise RuntimeError("install TraceGuard with the 'gemini' extra") from exc
-        system_prompt = payload.pop("system_prompt")
-        response = genai.Client(api_key=self.api_key).models.generate_content(
+        response = genai.Client(
+            api_key=self.api_key,
+            http_options=genai_types.HttpOptions(
+                base_url=self.base_url,
+                client_args={"trust_env": False},
+                async_client_args={"trust_env": False},
+            ),
+        ).models.generate_content(
             model=self.model,
             contents=json.dumps(payload, sort_keys=True),
             config={
@@ -204,7 +247,45 @@ class GeminiTaskAgentProvider:
         )
         if not isinstance(response.text, str) or not response.text.strip():
             raise RuntimeError("Gemini task agent returned an empty response")
-        return TaskAgentResponse.model_validate_json(response.text)
+        return validate_task_agent_response_json(response.text)
+
+    def _propose_openai_compatible(
+        self,
+        system_prompt: str,
+        payload: dict[str, Any],
+    ) -> TaskAgentResponse:
+        if not self.base_url:
+            raise RuntimeError("GEMINI_BASE_URL is required for OpenAI-compatible Gemini")
+        try:
+            import httpx
+            import openai
+        except ImportError as exc:
+            raise RuntimeError("install TraceGuard with the 'gemini' extra") from exc
+        client = openai.OpenAI(
+            api_key=self.api_key,
+            base_url=self.base_url,
+            max_retries=0,
+            http_client=httpx.Client(trust_env=False),
+        )
+        completion = client.chat.completions.create(
+            model=self.model,
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        f"{system_prompt}\n\nReturn only valid JSON matching this schema: "
+                        f"{json.dumps(TASK_AGENT_RESPONSE_SCHEMA, sort_keys=True)}"
+                    ),
+                },
+                {"role": "user", "content": json.dumps(payload, sort_keys=True)},
+            ],
+            temperature=0,
+            response_format={"type": "json_object"},
+        )
+        content = completion.choices[0].message.content
+        if not isinstance(content, str) or not content.strip():
+            raise RuntimeError("Gemini task agent returned an empty response")
+        return validate_task_agent_response_json(content)
 
 
 class StructuredTaskAgent:

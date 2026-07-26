@@ -178,6 +178,8 @@ def _build_runtime(
     supervisor_provider: SupervisorProviderName = "heuristic",
     supervisor_model: str | None = None,
     supervisor_url: str | None = None,
+    gemini_api_key: str | None = None,
+    gemini_base_url: str | None = None,
     timeout: float = 60.0,
     supervisor_max_retries: int = 2,
     supervisor_confidence_threshold: float = 0.55,
@@ -192,6 +194,8 @@ def _build_runtime(
         provider=supervisor_provider,
         supervisor_model=supervisor_model,
         ollama_url=supervisor_url,
+        gemini_api_key=gemini_api_key,
+        gemini_base_url=gemini_base_url,
         timeout=timeout,
         max_retries=supervisor_max_retries,
         confidence_threshold=supervisor_confidence_threshold,
@@ -348,6 +352,8 @@ def run_case(
     supervisor_provider: SupervisorProviderName = "heuristic",
     supervisor_model: str | None = None,
     supervisor_url: str | None = None,
+    gemini_api_key: str | None = None,
+    gemini_base_url: str | None = None,
     timeout: float = 60.0,
     supervisor_max_retries: int = 2,
     supervisor_confidence_threshold: float = 0.55,
@@ -371,6 +377,8 @@ def run_case(
         supervisor_provider=supervisor_provider,
         supervisor_model=supervisor_model,
         supervisor_url=supervisor_url,
+        gemini_api_key=gemini_api_key,
+        gemini_base_url=gemini_base_url,
         timeout=timeout,
         supervisor_max_retries=supervisor_max_retries,
         supervisor_confidence_threshold=supervisor_confidence_threshold,
@@ -384,7 +392,7 @@ def run_case(
         agent = StructuredTaskAgent(
             task_id=f"{case.case_id}:{seed}",
             provider=OllamaTaskAgentProvider(
-                model=agent_model or "qwen3:1.7b",
+                model=agent_model or "qwen3:4b",
                 url=agent_url or "http://127.0.0.1:11434",
                 timeout=timeout,
                 seed=seed,
@@ -396,6 +404,8 @@ def run_case(
             task_id=f"{case.case_id}:{seed}",
             provider=GeminiTaskAgentProvider(
                 model=agent_model or "gemini-3.5-flash",
+                api_key=gemini_api_key,
+                base_url=gemini_base_url,
             ),
             available_tools=runtime.tools.schemas(),
         )
@@ -697,6 +707,8 @@ def run_experiment(
     supervisor_provider: SupervisorProviderName = "heuristic",
     supervisor_model: str | None = None,
     supervisor_url: str | None = None,
+    gemini_api_key: str | None = None,
+    gemini_base_url: str | None = None,
     timeout: float = 60.0,
     supervisor_max_retries: int = 2,
     supervisor_confidence_threshold: float = 0.55,
@@ -748,7 +760,7 @@ def run_experiment(
                         "scripted-fixture"
                         if agent_provider == "scripted"
                         else agent_model
-                        or ("qwen3:1.7b" if agent_provider == "ollama" else "gemini-3.5-flash")
+                        or ("qwen3:4b" if agent_provider == "ollama" else "gemini-3.5-flash")
                     ),
                     "supervisor": (
                         "disabled"
@@ -757,7 +769,11 @@ def run_experiment(
                         or (
                             "heuristic-offline"
                             if supervisor_provider == "heuristic"
-                            else "qwen3:1.7b"
+                            else (
+                                "qwen3:4b"
+                                if supervisor_provider in {"ollama", "qwen"}
+                                else "gemini-3.5-flash"
+                            )
                         )
                     ),
                 },
@@ -800,6 +816,8 @@ def run_experiment(
                     supervisor_provider=supervisor_provider,
                     supervisor_model=supervisor_model,
                     supervisor_url=supervisor_url,
+                    gemini_api_key=gemini_api_key,
+                    gemini_base_url=gemini_base_url,
                     timeout=timeout,
                     supervisor_max_retries=supervisor_max_retries,
                     supervisor_confidence_threshold=supervisor_confidence_threshold,

@@ -53,7 +53,10 @@ def build_supervised_agentdojo_pipeline(
     supervisor_enable_rewrite: bool,
     supervisor_deterministic_enabled: bool,
     supervisor_log_path: Path | None,
+    gemini_api_key: str | None,
+    gemini_base_url: str | None,
     ollama_url: str,
+    camera_log_steps: bool = False,
     seed: int = 0,
     redaction_config: RedactionConfig | None = None,
     system_prompt: str | None = None,
@@ -101,6 +104,8 @@ def build_supervised_agentdojo_pipeline(
         supervisor = QwenSupervisor(
             provider=GeminiSupervisor(
                 model=supervisor_model,
+                api_key=gemini_api_key,
+                base_url=gemini_base_url,
                 timeout=supervisor_timeout,
                 max_transport_retries=supervisor_max_retries,
                 redaction_config=redaction_config,
@@ -156,6 +161,18 @@ def build_supervised_agentdojo_pipeline(
                 }
                 decisions.append(decision_record)
                 self._write_supervisor_log(decision_payload)
+                if camera_log_steps:
+                    safe_call = redact_value(call.model_dump(mode="json"), redaction_config)
+                    safe_reason = redact_value(decision.reason, redaction_config)
+                    safe_args = json.dumps(safe_call["arguments"], default=str)
+                    print(
+                        "[supervisor:"
+                        f"{supervisor_name}:{supervisor_model}] "
+                        f"tool={call.tool_name} args={safe_args} "
+                        f"decision={decision.decision.value} risk={decision.risk.value} "
+                        f"confidence={decision.confidence:.2f} reason={safe_reason}",
+                        flush=True,
+                    )
 
                 if decision.decision is Decision.REWRITE and decision.rewritten_call is not None:
                     tool_call.function = decision.rewritten_call.tool_name

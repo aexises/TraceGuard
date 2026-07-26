@@ -29,6 +29,8 @@ def test_custom_ablation_forwards_requested_supervisor_provider(monkeypatch, tmp
         seed=11,
         repetitions=2,
         agent_model="qwen3:4b",
+        gemini_api_key="test-key",
+        gemini_base_url="https://open.blackroute.space/v1",
         dry_run=False,
     )
 
@@ -39,6 +41,8 @@ def test_custom_ablation_forwards_requested_supervisor_provider(monkeypatch, tmp
     assert run_kwargs["supervisor_provider"] == "ollama"
     assert run_kwargs["supervisor_model"] == "qwen3:4b"
     assert run_kwargs["supervisor_url"] == "http://127.0.0.1:11434"
+    assert run_kwargs["gemini_api_key"] == "test-key"
+    assert run_kwargs["gemini_base_url"] == "https://open.blackroute.space/v1"
     assert run_kwargs["timeout"] == 37.0
     assert run_kwargs["seed"] == 11
     assert run_kwargs["artifacts_dir"] == Path(tmp_path)

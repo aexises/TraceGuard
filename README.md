@@ -23,10 +23,12 @@ ruff format --check .
 ```
 
 Install `.[gemini]`, `.[agentdojo]`, or both for external evaluations. Gemini
-credentials belong in `GEMINI_API_KEY`; Ollama uses its local HTTP API. The frozen
-local model choice is `qwen3:1.7b`, selected for the 8 GB evaluation host. The Gemini
-comparison model is `gemini-3.5-flash`; the former 2.0 identifier was removed after
-that model was shut down.
+credentials belong in `GEMINI_API_KEY`; set `GEMINI_BASE_URL` for OpenAI-compatible
+gateways such as `https://open.blackroute.space/v1`. Ollama uses its local HTTP API.
+The default local model is `qwen3:4b`; use `qwen3:1.7b` as the low-memory fallback for
+OOM, unavailable-model, or fast smoke runs. The Gemini comparison model is
+`gemini-3.5-flash`; the former 2.0 identifier was removed after that model was shut
+down.
 
 ## Offline smoke run
 
@@ -44,7 +46,8 @@ python -m traceguard demo
 
 # add a real Gemini task-agent and supervisor check
 export GEMINI_API_KEY='your-rotated-key'
-python -m traceguard demo --gemini
+export GEMINI_BASE_URL='https://open.blackroute.space/v1'
+python -m traceguard demo --gemini --gemini-base-url "$GEMINI_BASE_URL"
 ```
 
 The command prints each proposed tool call, the supervisor decision, the execution
@@ -90,8 +93,8 @@ python -m traceguard.run_ablation --suite custom --supervisor deterministic_llm 
 python -m traceguard.run_ablation \
   --suite agentdojo \
   --supervisor deterministic_llm \
-  --agent-model qwen3:1.7b \
-  --supervisor-model qwen3:1.7b \
+  --agent-model qwen3:4b \
+  --supervisor-model qwen3:4b \
   --agentdojo-suite workspace \
   --attack tool_knowledge \
   --dangerously-follow-tool-instructions \
@@ -100,10 +103,35 @@ python -m traceguard.run_ablation \
 
 # conclusion matrix across none, deterministic, llm, and deterministic_llm
 traceguard conclusion-ablation \
-  --agent-model qwen3:1.7b \
-  --supervisor-model qwen3:1.7b \
+  --agent-model qwen3:4b \
+  --supervisor-model qwen3:4b \
   --dangerously-follow-tool-instructions \
   --force-rerun
+```
+
+Camera-friendly Gemini ablation commands should use `tee` to save terminal output:
+
+```bash
+TS=$(date -u +%Y%m%dT%H%M%SZ)
+OUT=artifacts/conclusion_gemini_smoke_$TS
+mkdir -p "$OUT"
+
+stdbuf -oL -eL conda run -n traceguard-agentdojo env \
+  PYTHONPATH=src:. PYTHONUNBUFFERED=1 \
+  GEMINI_API_KEY="$GEMINI_API_KEY" \
+  GEMINI_BASE_URL="${GEMINI_BASE_URL:-https://open.blackroute.space/v1}" \
+  TRACEGUARD_GEMINI_TRANSPORT=auto \
+  traceguard conclusion-ablation \
+  --agent-provider gemini \
+  --supervisor-provider gemini \
+  --agent-model "${TRACEGUARD_GEMINI_MODEL:-gemini-3.5-flash}" \
+  --supervisor-model "${TRACEGUARD_GEMINI_MODEL:-gemini-3.5-flash}" \
+  --gemini-base-url "${GEMINI_BASE_URL:-https://open.blackroute.space/v1}" \
+  --smoke \
+  --camera-log-steps \
+  --dangerously-follow-tool-instructions \
+  --force-rerun \
+  --output-dir "$OUT" 2>&1 | tee "$OUT/terminal.log"
 ```
 
 Traces, manifests, CSV/JSON summaries, paired comparisons, and representative traces are

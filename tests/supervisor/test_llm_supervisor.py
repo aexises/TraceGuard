@@ -17,8 +17,10 @@ from traceguard.supervisor.llm import (
     GeminiSupervisor,
     GoogleGenAITransport,
     OllamaSupervisor,
+    OpenAICompatibleGeminiTransport,
     QwenSupervisor,
     UrlLibOllamaTransport,
+    build_gemini_transport,
 )
 from traceguard.types import (
     Decision,
@@ -392,18 +394,85 @@ def test_google_transport_applies_timeout_and_exposes_usage(monkeypatch):
     monkeypatch.setitem(sys.modules, "google", google_module)
     monkeypatch.setitem(sys.modules, "google.genai", genai_module)
 
-    raw = GoogleGenAITransport("test-key").generate_json(
+    raw = GoogleGenAITransport("test-key", base_url="https://example.test/gemini").generate_json(
         model="gemini-test",
         system="system",
         prompt="prompt",
         timeout=1.25,
     )
 
+    assert captured["client"]["api_key"] == "test-key"
+    assert captured["http_options"]["base_url"] == "https://example.test/gemini"
     assert captured["http_options"]["timeout"] == 1250
+    assert captured["http_options"]["client_args"] == {"trust_env": False}
     assert raw["_traceguard_provider_metadata"] == {
         "prompt_eval_count": 17,
         "eval_count": 5,
     }
+
+
+def test_openai_compatible_gemini_transport_uses_base_url_and_metadata(monkeypatch):
+    captured = {}
+
+    class FakeHttpClient:
+        def __init__(self, **kwargs):
+            captured["http_client"] = kwargs
+
+    class FakeCompletions:
+        def create(self, **kwargs):
+            captured["completion"] = kwargs
+            return types.SimpleNamespace(
+                choices=[
+                    types.SimpleNamespace(
+                        message=types.SimpleNamespace(content=json.dumps(response_json()))
+                    )
+                ],
+                usage=types.SimpleNamespace(prompt_tokens=23, completion_tokens=7),
+            )
+
+    class FakeOpenAIClient:
+        def __init__(self, **kwargs):
+            captured["client"] = kwargs
+            self.chat = types.SimpleNamespace(completions=FakeCompletions())
+
+    openai_module = types.ModuleType("openai")
+    openai_module.OpenAI = FakeOpenAIClient
+    httpx_module = types.ModuleType("httpx")
+    httpx_module.Client = FakeHttpClient
+    monkeypatch.setitem(sys.modules, "openai", openai_module)
+    monkeypatch.setitem(sys.modules, "httpx", httpx_module)
+
+    raw = OpenAICompatibleGeminiTransport(
+        api_key="test-key",
+        base_url="https://open.blackroute.space/v1",
+    ).generate_json(
+        model="gemini-test",
+        system="system",
+        prompt="prompt",
+        timeout=2.5,
+    )
+
+    assert captured["client"]["api_key"] == "test-key"
+    assert captured["client"]["base_url"] == "https://open.blackroute.space/v1"
+    assert captured["client"]["timeout"] == 2.5
+    assert captured["http_client"]["trust_env"] is False
+    assert captured["completion"]["model"] == "gemini-test"
+    assert captured["completion"]["response_format"] == {"type": "json_object"}
+    assert raw["_traceguard_provider_metadata"] == {
+        "prompt_eval_count": 23,
+        "eval_count": 7,
+    }
+
+
+def test_gemini_transport_auto_selects_openai_for_base_url(monkeypatch):
+    monkeypatch.delenv("TRACEGUARD_GEMINI_TRANSPORT", raising=False)
+
+    transport = build_gemini_transport(
+        api_key="test-key",
+        base_url="https://open.blackroute.space/v1",
+    )
+
+    assert isinstance(transport, OpenAICompatibleGeminiTransport)
 
 
 def test_gemini_provider_records_token_usage():
@@ -418,6 +487,15 @@ def test_gemini_provider_records_token_usage():
 
     assert result.metadata.prompt_eval_count == 17
     assert result.metadata.eval_count == 5
+
+
+def test_gemini_provider_ignores_gateway_schema_extra_key():
+    raw = response_json(additionalProperties=False)
+    provider = GeminiSupervisor(transport=FakeGeminiTransport(raw))
+
+    result = provider.evaluate(request())
+
+    assert result.decision is Decision.ALLOW
 
 
 def test_gemini_provider_redacts_prompt_payload():

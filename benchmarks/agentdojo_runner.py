@@ -55,6 +55,7 @@ class AgentDojoRunConfig(BaseModel):
     injection_tasks: list[str] = Field(default_factory=list)
     model: str = "local"
     model_id: str | None = "gemma3:4b"
+    gemini_base_url: str | None = None
     defense: str | None = None
     local_port: int = Field(default=11434, ge=1, le=65535)
     attack: str | None = "tool_knowledge"
@@ -1004,6 +1005,7 @@ def run_agentdojo_benchmark(config: AgentDojoRunConfig) -> AgentDojoRunSummary:
             genai.Client(
                 api_key=os.environ["GEMINI_API_KEY"],
                 http_options=genai_types.HttpOptions(
+                    base_url=config.gemini_base_url or os.getenv("GEMINI_BASE_URL"),
                     client_args={"trust_env": False},
                     async_client_args={"trust_env": False},
                 ),
