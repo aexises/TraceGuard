@@ -183,8 +183,16 @@ def test_requires_validated_plan_and_supported_enabled_profile(tmp_path):
     assert not fake.commands
 
 
-def test_checks_daemon_architecture_and_exact_digest_before_run(tmp_path):
-    wrong_arch = FakeDocker(architecture="amd64")
+@pytest.mark.parametrize("architecture", ["arm64", "aarch64", "amd64", "x86_64"])
+def test_accepts_supported_daemon_architectures(tmp_path, architecture):
+    fake = FakeDocker(architecture=architecture)
+    evidence = runner(tmp_path, fake).execute(plan())
+    assert evidence.exit_code == 0
+    assert any(command[1] == "run" for command in fake.commands)
+
+
+def test_rejects_unsupported_architecture_and_wrong_digest(tmp_path):
+    wrong_arch = FakeDocker(architecture="s390x")
     with pytest.raises(SandboxUnavailable, match="not allowed"):
         runner(tmp_path, wrong_arch).execute(plan())
     assert not any(command[1] == "run" for command in wrong_arch.commands)
