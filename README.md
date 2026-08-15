@@ -154,7 +154,7 @@ timeout, and output limits. Container and staging cleanup runs on success, failu
 timeout. If Docker, digest/architecture verification, artifact inspection, persistence,
 or cleanup cannot be verified, execution fails closed and the runtime escalates.
 
-On the ARM64 Docker Desktop evaluation host, pull and verify the exact image:
+On an ARM64 or amd64 Docker host, pull and verify the exact multi-architecture image:
 
 ```bash
 docker pull python@sha256:25976e9d34a0fab1f278cae931f34c8303d97bf0c0d7f85b6b4dcf641d7702a4
