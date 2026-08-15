@@ -498,9 +498,7 @@ def _conclusion_manifest(args: argparse.Namespace, output_dir: Path) -> dict[str
             "provider": supervisor_provider,
             "model": args.supervisor_model,
             "url": args.supervisor_url if supervisor_provider == "ollama" else None,
-            "gemini_base_url": args.gemini_base_url
-            if supervisor_provider == "gemini"
-            else None,
+            "gemini_base_url": args.gemini_base_url if supervisor_provider == "gemini" else None,
             "max_retries": args.supervisor_max_retries,
             "timeout_seconds": args.timeout,
             "confidence_threshold": args.supervisor_confidence_threshold,

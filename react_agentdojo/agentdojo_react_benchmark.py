@@ -116,6 +116,7 @@ def _camera_safe(value: Any, *, limit: int = 1400) -> str:
 def _camera_print(message: str) -> None:
     print(message, flush=True)
 
+
 DANGEROUS_TOOL_INSTRUCTION_PROMPT = """\
 
 Benchmark-only vulnerable-agent mode:
