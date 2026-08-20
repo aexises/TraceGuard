@@ -1,0 +1,46 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: traceguard-api
+  labels: {app.kubernetes.io/name: traceguard}
+spec:
+  selector: {app.kubernetes.io/name: traceguard}
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: traceguard-api
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app.kubernetes.io/name: traceguard}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: traceguard}
+    spec:
+      automountServiceAccountToken: false
+      securityContext:
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: api
+          # Release tooling must replace this with an immutable digest.
+          image: ghcr.io/example/traceguard@sha256:REPLACE_WITH_RELEASE_DIGEST
+          ports: [{name: http, containerPort: 8080}]
+          env:
+            - name: TRACEGUARD_SIGNING_KEY
+              valueFrom: {secretKeyRef: {name: traceguard-secrets, key: signing-key}}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+            runAsNonRoot: true
+            runAsUser: 10001
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {cpu: "1", memory: 512Mi}
+          readinessProbe: {httpGet: {path: /healthz, port: http}}
+          livenessProbe: {httpGet: {path: /healthz, port: http}}

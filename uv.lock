@@ -3793,7 +3793,9 @@ name = "traceguard"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "fastapi" },
     { name = "pydantic" },
+    { name = "uvicorn" },
 ]
 
 [package.optional-dependencies]
@@ -3824,6 +3826,7 @@ requires-dist = [
     { name = "agentdojo", marker = "extra == 'agentdojo'", specifier = "==0.1.35" },
     { name = "build", marker = "extra == 'dev'", specifier = ">=1.2" },
     { name = "datasketch", marker = "extra == 'datasets'", specifier = "==2.0.0" },
+    { name = "fastapi", specifier = ">=0.115,<1" },
     { name = "google-genai", marker = "extra == 'gemini'", specifier = ">=1.0" },
     { name = "hatchling", marker = "extra == 'dev'", specifier = ">=1.25" },
     { name = "inspect-ai", marker = "extra == 'inspect'", specifier = "==0.3.248" },
@@ -3833,6 +3836,7 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=5.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6" },
+    { name = "uvicorn", specifier = ">=0.30,<1" },
 ]
 provides-extras = ["gemini", "dev", "agentdojo", "datasets", "inspect"]
 
