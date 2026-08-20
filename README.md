@@ -2,7 +2,6 @@
 
 TraceGuard is a research runtime for evaluating system-prompt defenses, deterministic policy, and LLM supervision for tool-using agents. Docker is used only as a conditional containment mechanism for uncertain, medium-risk command calls.
 
-The owner-specific implementation and research checklist is in [`TODO.md`](TODO.md).
 The reproducible results narrative is in
 [`docs/evaluation_report.md`](docs/evaluation_report.md), and the short walkthrough is
 in [`docs/demo.md`](docs/demo.md). Supervisor precedence and label semantics are in
