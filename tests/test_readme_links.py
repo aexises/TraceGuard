@@ -6,7 +6,6 @@ import re
 import subprocess
 from pathlib import Path
 
-
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 README_PATH = REPOSITORY_ROOT / "README.md"
 LOCAL_LINK_PATTERN = re.compile(r"\[[^]]+\]\(([^)#]+)(?:#[^)]*)?\)")
@@ -27,6 +26,5 @@ def test_readme_local_links_target_tracked_files() -> None:
         text=True,
     )
     assert result.returncode == 0, (
-        "README links must target tracked files, not local-only documents: "
-        f"{', '.join(targets)}"
+        f"README links must target tracked files, not local-only documents: {', '.join(targets)}"
     )
