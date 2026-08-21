@@ -5,11 +5,13 @@ build-backend = "hatchling.build"
 [project]
 name = "traceguard"
 version = "0.1.0"
-description = "Research runtime for supervising tool-using LLM agents"
+description = "Safety control plane for governing AI model and agent actions"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+  "fastapi>=0.115,<1",
   "pydantic>=2.7,<3",
+  "uvicorn>=0.30,<1",
 ]
 
 [project.optional-dependencies]
@@ -30,6 +32,7 @@ inspect = [
 
 [project.scripts]
 traceguard = "traceguard.cli:main"
+traceguard-api = "traceguard.control.api:run"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/traceguard", "benchmarks", "react_agentdojo"]
@@ -52,3 +55,7 @@ select = ["E", "F", "I", "UP", "B"]
 [tool.ruff.lint.per-file-ignores]
 "benchmarks/agentdojo_runner.py" = ["E501", "I001"]
 "react_agentdojo/agentdojo_react_benchmark.py" = ["E402", "E501", "E731"]
+"src/traceguard/control/service.py" = ["E501"]
+"src/traceguard/control/api.py" = ["B008", "E501"]
+"src/traceguard/sdk.py" = ["E501"]
+"tests/test_control_plane.py" = ["E501"]
