@@ -106,7 +106,14 @@ class ArtifactStore:
             raise ValueError("invalid artifact identity")
         return artifact_id
 
-    def ingest(self, source: Path, paths: list[str], *, artifact_id: str | None = None) -> str:
+    def ingest(
+        self,
+        source: Path,
+        paths: list[str],
+        *,
+        artifact_id: str | None = None,
+        action_digest: str | None = None,
+    ) -> str:
         identity = self._id(artifact_id or uuid4().hex)
         directory = self.private / identity
         directory.mkdir(mode=0o700)
@@ -121,6 +128,10 @@ class ArtifactStore:
                     read_confined(content_root, path, max_bytes=budget.max_file_bytes)
                 ).hexdigest()
             manifest = {"id": identity, "status": "quarantined", "files": records}
+            if action_digest is not None:
+                if not re.fullmatch(r"[0-9a-f]{64}", action_digest):
+                    raise ValueError("invalid action binding")
+                manifest["action_digest"] = action_digest
             write_confined(
                 directory, "manifest.json", json.dumps(manifest, sort_keys=True).encode()
             )

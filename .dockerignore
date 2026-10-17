@@ -1,0 +1,15 @@
+**
+!pyproject.toml
+!uv.lock
+!README.md
+!src/
+!src/**
+!benchmarks/
+!benchmarks/**
+!react_agentdojo/
+!react_agentdojo/**
+!configs/
+!configs/**
+**/__pycache__
+**/*.pyc
+**/.env*
