@@ -175,3 +175,34 @@ def test_real_artifact_build_exports_only_inspected_output(tmp_path):
     assert (Path(evidence.artifact_directory) / "result.txt").read_text(
         encoding="utf-8"
     ) == "safe result"
+
+
+@pytest.mark.parametrize("quota", ["bytes", "inodes"])
+def test_real_artifact_tmpfs_stops_allocations_before_export(tmp_path, quota):
+    raw = json.loads(CONFIG_PATH.read_text())
+    raw["profiles"]["artifact_build"]["artifact_limits"].update(
+        {
+            "max_total_bytes": 4096 if quota == "bytes" else 65536,
+            "max_file_bytes": 4096,
+            "max_inodes": 16,
+        }
+    )
+    config = tmp_path / "quota-config.json"
+    config.write_text(json.dumps(raw))
+    operation = (
+        "Path('/traceguard/output/data').write_bytes(b'x'*16384)"
+        if quota == "bytes"
+        else "\n for i in range(100): Path('/traceguard/output/'+str(i)).touch()"
+    )
+    script = (
+        "from pathlib import Path\nimport errno\ntry:\n "
+        + operation
+        + "\nexcept OSError as e:\n assert e.errno == errno.ENOSPC; print('QUOTA_ENFORCED')\n"
+        "else:\n raise SystemExit('quota was not enforced')"
+    )
+    evidence = execute(
+        tmp_path, ["python3", "-c", script], profile="artifact_build", config_path=config
+    )
+    assert evidence.exit_code == 0, evidence.stderr
+    assert "QUOTA_ENFORCED" in evidence.stdout
+    assert evidence.artifact_status == "quarantined"

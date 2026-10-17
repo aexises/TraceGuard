@@ -8,6 +8,7 @@ secure-outcome regressions; passing tests do not replace independent security re
 | Staging and strict enforcement | Descriptor-relative no-follow regular-file copies; hardlink/special-file rejection; shared entry/byte/depth/time budgets; strict grants cannot be skipped by an LLM ablation switch | 118 focused staging, sandbox, strict-mode and supervisor tests passed |
 | Embedded effects | Strict embedded side effects require an application-bound task and private SQLite ledger; shared reserve/unknown/receipt logic with isolated execution; provider-verified reviewer reconciliation | Restart, concurrent instances, task substitution and uncertain-effect regressions |
 | Persistent authority | Signed bounded transactional SQLite state, stable separated execution keys, restart/recovery, backup/offline rekey, durable revocation and tenant suspension, JSON/concurrency/rate budgets | Restarted grants/reviews, rollback-on-quota, concurrent instances, corrupt/missing state, backup/rekey and ingress regressions |
+| Sandbox and release | Kernel tmpfs byte/inode quotas; bounded isolated export; private hashed quarantine and explicit atomic release; model-provider/final-answer sink gates | Quarantine, tamper/rejection, secret canary, provider withholding and Docker quota canaries |
 
 Sandbox `input_limits` apply while traversing and copying, before Docker starts. The
 workspace and staging parent are application-owned. Concurrently changed objects are
@@ -33,8 +34,10 @@ crash record only after fencing the old worker and confirming definitive provide
 See `authority_storage.md` for the single-host profile, capacity and offline rotation
 workflow. External KMS/fencing/checkpoint integration is not supplied by a local snapshot.
 
+See `data_release.md` for the narrowly supported text/JSON classification profile. This
+requires trusted application/source labels and is not general-purpose semantic DLP.
+
 Still to deliver: an isolated authenticated
-executor integration; sandbox/quarantine/data
-release controls; corrected effect metrics and reproducible evaluation; release security
+executor integration; corrected effect metrics and reproducible evaluation; release security
 evidence and support policy. External reviewers and application pilots are not arranged.
 The repository owner's distribution license decision remains pending.
