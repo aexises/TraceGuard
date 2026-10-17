@@ -1,0 +1,7 @@
+{
+  "version": "security-effects-v1",
+  "email": {
+    "recipient_fields": ["recipients", "to", "recipient", "cc", "bcc"],
+    "object_fields": ["attachments"]
+  }
+}

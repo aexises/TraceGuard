@@ -14,6 +14,7 @@ from functools import lru_cache
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from traceguard.policy.effects import email_effects, security_descriptors
 from traceguard.types import (
     Decision,
     GoalNecessity,
@@ -240,6 +241,20 @@ def check_authority(
             "prohibited-disclosure",
             "Proposed arguments disclose protected content.",
         )
+    if call.tool_name == "send_email":
+        try:
+            email = email_effects(call)
+        except ValueError:
+            return output(Decision.BLOCK, "invalid-email-effect", "Invalid email destinations.")
+        for field in email.referenced_objects:
+            if field not in authority.argument_values.get(
+                call.tool_name, {}
+            ) and field not in authority.delegated_fields.get(call.tool_name, {}):
+                return output(
+                    Decision.ESCALATE,
+                    "unscoped-email-attachment",
+                    "Email attachments require explicit trusted object authorization.",
+                )
     for field in ("path", "file_path"):
         if field in call.arguments and sensitive_path(str(call.arguments[field])):
             return output(
@@ -299,9 +314,12 @@ def check_authority(
         else None
     )
     explicit_emails = set(EMAIL_RE.findall(goal.casefold()))
-    for field in ("recipients", "to", "recipient", "participants", "email"):
+    destination_fields = set(("recipients", "to", "recipient", "participants", "email"))
+    if call.tool_name == "send_email":
+        destination_fields.update(security_descriptors()["email"]["recipient_fields"])
+    for field in sorted(destination_fields):
         actual = call.arguments.get(field)
-        if actual is None:
+        if actual is None or actual == []:
             continue
         if explicit_emails and not _values(actual).issubset(explicit_emails):
             return output(
