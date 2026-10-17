@@ -5,10 +5,14 @@ from __future__ import annotations
 import hashlib
 import time
 from copy import copy
+from decimal import Decimal
 from pathlib import Path
 from threading import RLock
 
-from traceguard.policy.authorization import duplicate_mutation, output
+from traceguard.control.service import AuthorizationError
+from traceguard.control.signing import canonical
+from traceguard.ledger import ExecutionLedger, ExecutionUnknown
+from traceguard.policy.authorization import duplicate_mutation, output, tool_effect
 from traceguard.policy.engine import DeterministicPolicy
 from traceguard.policy.kernel import CompiledAuthority
 from traceguard.sandbox.runner import ContainerRunner, SandboxUnavailable
@@ -18,6 +22,7 @@ from traceguard.supervisor.contracts import (
     _validate_arguments_against_json_schema,
     validate_replacement,
 )
+from traceguard.supervisor.redaction import redact_value
 from traceguard.tools.registry import ToolRegistry
 from traceguard.types import (
     Decision,
@@ -56,8 +61,12 @@ class TraceGuardRuntime:
         supervisor: Supervisor | None = None,
         sandbox: ContainerRunner | None = None,
         task_authority: TaskAuthority | None = None,
+        effect_ledger: ExecutionLedger | None = None,
+        bound_task_id: str | None = None,
     ) -> None:
         self._lock = RLock()
+        self.effect_ledger = effect_ledger
+        self.bound_task_id = bound_task_id
         self.tools = tools
         self.config = config.model_copy(deep=True)
         self.policy = copy(policy) if policy is not None else None
@@ -69,6 +78,8 @@ class TraceGuardRuntime:
             if self.task_authority.enforcement_mode == "strict"
             else None
         )
+        if effect_ledger is not None and self.compiled_authority is None:
+            raise ValueError("embedded effect ledger requires explicit strict authority")
         self.executed_calls: dict[str, list[ToolCall]] = {}
         self.escalated_tasks: set[str] = set()
         if self.policy is not None:
@@ -83,12 +94,21 @@ class TraceGuardRuntime:
         self, user_task: str, call: ToolCall, observations: list[Observation]
     ) -> RuntimeResult:
         with self._lock:
-            return self._execute_call(user_task, call, observations)
+            return self._execute_call(
+                user_task,
+                call.model_copy(deep=True),
+                [item.model_copy(deep=True) for item in observations],
+            )
 
     def _execute_call(
         self, user_task: str, call: ToolCall, observations: list[Observation]
     ) -> RuntimeResult:
         started = time.monotonic()
+        if self.bound_task_id is not None and call.task_id != self.bound_task_id:
+            denied = output(Decision.BLOCK, "wrong-task", "Task ID differs from approved scope.")
+            return RuntimeResult(
+                self._trace(call, call, [denied], None, None, started, "BLOCK"), None
+            )
         if call.task_id in self.escalated_tasks:
             denied = output(
                 Decision.ESCALATE, "episode-escalated", "Episode requires human review."
@@ -179,13 +199,55 @@ class TraceGuardRuntime:
                 self._trace(call, effective_call, outputs, plan, observation, started, "SIMULATED"),
                 observation,
             )
+        reserved = False
+        if self.effect_ledger is not None and tool_effect(effective_call) in {"mutate", "command"}:
+            payload = {
+                "tool": effective_call.tool_name,
+                "arguments": effective_call.arguments,
+                "resources": effective_call.requested_resources,
+                "task": effective_call.task_id,
+            }
+            digest = hashlib.sha256(canonical(payload)).hexdigest()
+            try:
+                replay = self.effect_ledger.reserve(
+                    scope=("embedded", "application", self.compiled_authority.digest, call.task_id),
+                    nonce=effective_call.call_id,
+                    idempotency_key=effective_call.call_id,
+                    digest=digest,
+                    effect_digest=digest,
+                    amount=Decimal(str(effective_call.arguments.get("amount", 0))),
+                    budget_limit=(
+                        str(self.task_authority.max_amount)
+                        if self.task_authority.max_amount is not None
+                        else None
+                    ),
+                    repeatable=effective_call.tool_name in self.task_authority.repeatable_tools,
+                )
+                if replay is not None:
+                    observation = Observation.model_validate_json(replay["result"])
+                    return RuntimeResult(
+                        self._trace(
+                            call, effective_call, outputs, plan, observation, started, "REPLAYED"
+                        ),
+                        observation,
+                    )
+                reserved = True
+            except (ExecutionUnknown, AuthorizationError):
+                return RuntimeResult(
+                    self._trace(call, effective_call, outputs, plan, None, started, "ESCALATE"),
+                    None,
+                )
         if target is ExecutionTarget.CONTAINER:
             if self.sandbox is None:
+                if reserved:
+                    self.effect_ledger.finish(effective_call.call_id, "not_dispatched")
                 trace = self._trace(call, effective_call, outputs, plan, None, started, "ESCALATE")
                 return RuntimeResult(trace, None)
             try:
                 evidence = self.sandbox.execute(plan)
             except SandboxUnavailable:
+                if reserved:
+                    self.effect_ledger.finish(effective_call.call_id, "unknown")
                 trace = self._trace(call, effective_call, outputs, plan, None, started, "ESCALATE")
                 return RuntimeResult(trace, None)
             self.executed_calls.setdefault(call.task_id, []).append(effective_call)
@@ -197,6 +259,10 @@ class TraceGuardRuntime:
                 provenance_chain=[*call.consumed_observation_ids, call.call_id],
                 may_contain_instructions=True,
             )
+            if reserved:
+                self.effect_ledger.finish(
+                    effective_call.call_id, "succeeded", self._receipt(observation)
+                )
             post_run = None
             if self.config.post_run_reevaluation and self.supervisor:
                 post_run = self.supervisor.reevaluate(user_task, effective_call, evidence)
@@ -225,8 +291,18 @@ class TraceGuardRuntime:
         try:
             observation = self.tools.execute(effective_call)
         except (KeyError, OSError, SyntaxError, TypeError, ValueError) as exc:
+            consequential = tool_effect(effective_call) in {"mutate", "command"}
+            if reserved:
+                self.effect_ledger.finish(effective_call.call_id, "unknown")
+            if consequential:
+                self.executed_calls.setdefault(call.task_id, []).append(effective_call)
+                self.escalated_tasks.add(call.task_id)
             observation = Observation(
-                content=f"{type(exc).__name__}: {exc}",
+                content=(
+                    "Effect outcome unknown; reconcile before retry."
+                    if consequential
+                    else f"{type(exc).__name__}: {redact_value(str(exc))}"
+                ),
                 source_type="tool_error",
                 source_id=call.call_id,
                 trust=TrustLabel.TRUSTED_TOOL,
@@ -240,9 +316,17 @@ class TraceGuardRuntime:
                 plan,
                 observation,
                 started,
-                "TOOL_ERROR",
+                "EXECUTION_UNKNOWN" if consequential else "TOOL_ERROR",
             )
             return RuntimeResult(trace, observation)
+        except BaseException:
+            if reserved:
+                self.effect_ledger.finish(effective_call.call_id, "unknown")
+            raise
+        if reserved:
+            self.effect_ledger.finish(
+                effective_call.call_id, "succeeded", self._receipt(observation)
+            )
         self.executed_calls.setdefault(call.task_id, []).append(effective_call)
         outcome = (
             "SIMULATED"
@@ -252,6 +336,17 @@ class TraceGuardRuntime:
         )
         trace = self._trace(call, effective_call, outputs, plan, observation, started, outcome)
         return RuntimeResult(trace, observation)
+
+    @staticmethod
+    def _receipt(observation: Observation) -> str:
+        import json
+
+        safe = observation.model_copy(deep=True)
+        try:
+            safe.content = json.dumps(redact_value(json.loads(safe.content)), sort_keys=True)
+        except json.JSONDecodeError:
+            safe.content = redact_value(safe.content)
+        return safe.model_dump_json()
 
     def _set_supervisor_context(self, call: ToolCall, *, rewritten: bool = False) -> None:
         if self.policy is not None:
