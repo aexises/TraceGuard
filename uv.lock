@@ -3793,6 +3793,7 @@ name = "traceguard"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "cryptography" },
     { name = "fastapi" },
     { name = "jsonschema" },
     { name = "pydantic" },
@@ -3826,6 +3827,7 @@ inspect = [
 requires-dist = [
     { name = "agentdojo", marker = "extra == 'agentdojo'", specifier = "==0.1.35" },
     { name = "build", marker = "extra == 'dev'", specifier = ">=1.2" },
+    { name = "cryptography", specifier = ">=43,<50" },
     { name = "datasketch", marker = "extra == 'datasets'", specifier = "==2.0.0" },
     { name = "fastapi", specifier = ">=0.115,<1" },
     { name = "google-genai", marker = "extra == 'gemini'", specifier = ">=1.0" },

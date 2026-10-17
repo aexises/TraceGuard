@@ -18,7 +18,7 @@ unmediated agent safe by itself.
 The policy audit is in [`docs/policy_review_20261006.md`](docs/policy_review_20261006.md).
 The implementation and local pilot follow-up is in
 [`docs/hardening_and_pilot_20261006.md`](docs/hardening_and_pilot_20261006.md).
-Active contracts are `types-v3`, custom policy `2.0.0`, `effects-v1`, and supervisor
+Active contracts are `types-v4`, custom policy `2.0.0`, `effects-v1`, and supervisor
 `supervisor_v2.txt`. Historical custom results use older enforcement and the heuristic
 surrogate; they do not demonstrate incremental live-supervisor value.
 
@@ -58,6 +58,45 @@ single-replica development only; production persistence and identity adapters re
 checks references; add `--output-manifest artifacts/release/control-plane.yaml` to write a
 new manifest. Follow the separate registry and Kubernetes-schema gates in
 [the container release guide](docs/control_plane.md#container-build-and-release-checks).
+
+## Strict application integration
+
+Use `traceguard.security.SecuredTools` with application-owned `TaskAuthority`.
+It compiles an explicit tool allowlist, exact/resource/source constraints and reviewed
+`generated_fields` into an immutable grant. Every consequential field needs authority;
+English verbs and model explanations cannot create permissions. For example:
+
+```python
+from pathlib import Path
+from traceguard.security import SecuredTools
+from traceguard.tools.registry import default_registry
+from traceguard.types import TaskAuthority
+
+boundary = SecuredTools(
+    default_registry(Path("."), Path("artifacts")),
+    TaskAuthority(
+        allowed_tools=["write_report"],
+        argument_values={"write_report": {"path": "artifacts/report.txt"}},
+        generated_fields={"write_report": ["content"]},
+    ),
+)
+# Supply model ToolCall proposals only to boundary.execute_call(...).
+```
+
+The existing `TraceGuardRuntime`/ablation interfaces preserve explicitly labelled
+research heuristics for historical experiments; they are not the strict product entry
+point. In-process integration trusts application code and cannot contain arbitrary code
+with the host's own credentials. The isolated executor profile remains a release gate.
+
+Run the deterministic development comparison with
+`python -m benchmarks.policy_conformance`. These authored cases compare the current
+research grammar with explicit grants; they do not reproduce CaMeL/Progent or prove
+live-model effectiveness. See `docs/security_framework.md` for the security contract,
+reference comparison and remaining release gates.
+
+For action-bound grant issuance, durable execution reservations and human review, see
+[the execution contract](docs/execution_grants.md). The isolated-executor deployment
+profile still requires actual process, credential and egress isolation.
 
 ## How it works
 

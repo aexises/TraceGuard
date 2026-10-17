@@ -9,6 +9,7 @@ from typing import Any
 from uuid import NAMESPACE_URL, uuid5
 
 from traceguard.policy.authorization import check_authority, duplicate_mutation, output
+from traceguard.supervisor.base import enforce_allow_invariants
 from traceguard.supervisor.contracts import (
     SupervisorEvaluationLog,
     SupervisorSchemaError,
@@ -76,6 +77,7 @@ def build_supervised_agentdojo_pipeline(
     """Build an AgentDojo pipeline with TraceGuard between LLM and tools."""
 
     redaction_config = mandatory_redaction_config(redaction_config)
+    task_authority = (task_authority or TaskAuthority()).model_copy(deep=True)
 
     from agentdojo.agent_pipeline.agent_pipeline import AgentPipeline
     from agentdojo.agent_pipeline.base_pipeline_element import BasePipelineElement
@@ -249,6 +251,7 @@ def build_supervised_agentdojo_pipeline(
                         decision = checked.model_copy(
                             update={"decision": Decision.ESCALATE, "rewritten_call": None}
                         )
+                decision = enforce_allow_invariants(decision)
                 decision_payload = decision.model_dump(mode="json")
                 decision_record = {
                     **decision_payload,

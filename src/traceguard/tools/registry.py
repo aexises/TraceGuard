@@ -17,6 +17,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from traceguard.policy.authorization import sensitive_path
+from traceguard.tools.filesystem import read_confined, write_confined
 from traceguard.types import Observation, RiskLevel, ToolCall, TrustLabel
 
 MAX_READ_BYTES = 262_144  # 256 KiB
@@ -194,19 +195,6 @@ def evaluate_expression(expression: str) -> float:
     return _calculate(ast.parse(expression, mode="eval"))
 
 
-def _read_text_bounded(path: Path, *, max_bytes: int = MAX_READ_BYTES) -> str:
-    size = path.stat().st_size
-    if size > max_bytes:
-        raise ValueError(f"file exceeds read limit of {max_bytes} bytes")
-    raw = path.read_bytes()
-    if len(raw) > max_bytes:
-        raise ValueError(f"file exceeds read limit of {max_bytes} bytes")
-    try:
-        return raw.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise ValueError("file is not valid UTF-8") from exc
-
-
 def _load_document_corpus(workspace: Path) -> list[dict[str, str]]:
     """Load fixture-backed documents from workspace/documents/ when present."""
     docs_dir = workspace / "documents"
@@ -226,7 +214,7 @@ def _load_document_corpus(workspace: Path) -> list[dict[str, str]]:
         relative = path.relative_to(workspace).as_posix()
         if sensitive_path(relative):
             raise ValueError("protected object in document corpus")
-        text = _read_text_bounded(path)
+        text = read_confined(workspace, relative, max_bytes=MAX_READ_BYTES).decode("utf-8")
         documents.append({"path": relative, "text": text})
     return documents
 
@@ -234,12 +222,6 @@ def _load_document_corpus(workspace: Path) -> list[dict[str, str]]:
 def default_registry(workspace: Path, artifacts: Path) -> ToolRegistry:
     workspace = workspace.resolve()
     artifacts = artifacts.resolve()
-
-    def contained(root: Path, raw_path: str) -> Path:
-        candidate = (root / raw_path).resolve()
-        if candidate != root and root not in candidate.parents:
-            raise ValueError(f"path escapes allowed root: {raw_path}")
-        return candidate
 
     def search_documents(args: ToolArguments) -> str:
         assert isinstance(args, SearchDocumentsArguments)
@@ -256,10 +238,10 @@ def default_registry(workspace: Path, artifacts: Path) -> ToolRegistry:
 
     def read_file(args: ToolArguments) -> str:
         assert isinstance(args, ReadFileArguments)
-        path = contained(workspace, args.path)
-        if not path.is_file():
-            raise ValueError(f"file not found: {args.path}")
-        return _read_text_bounded(path)
+        try:
+            return read_confined(workspace, args.path, max_bytes=MAX_READ_BYTES).decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise ValueError("file is not valid UTF-8") from exc
 
     def calculator(args: ToolArguments) -> str:
         assert isinstance(args, CalculatorArguments)
@@ -273,10 +255,8 @@ def default_registry(workspace: Path, artifacts: Path) -> ToolRegistry:
             raise ValueError(f"report exceeds write limit of {MAX_WRITE_BYTES} bytes")
         parts = PurePath(args.path).parts
         relative_path = str(Path(*parts[1:])) if parts and parts[0] == "artifacts" else args.path
-        destination = contained(artifacts, relative_path)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_bytes(encoded)
-        return str(destination.relative_to(artifacts))
+        write_confined(artifacts, relative_path, encoded)
+        return relative_path
 
     def restricted_command(args: ToolArguments) -> str:
         assert isinstance(args, RestrictedCommandArguments)

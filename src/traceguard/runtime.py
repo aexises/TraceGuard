@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import time
+from copy import copy
 from pathlib import Path
+from threading import RLock
 
 from traceguard.policy.authorization import duplicate_mutation, output
 from traceguard.policy.engine import DeterministicPolicy
+from traceguard.policy.kernel import CompiledAuthority
 from traceguard.sandbox.runner import ContainerRunner, SandboxUnavailable
 from traceguard.supervisor.base import Supervisor, merge_outputs
 from traceguard.supervisor.contracts import (
@@ -54,15 +57,22 @@ class TraceGuardRuntime:
         sandbox: ContainerRunner | None = None,
         task_authority: TaskAuthority | None = None,
     ) -> None:
+        self._lock = RLock()
         self.tools = tools
-        self.config = config
-        self.policy = policy
-        self.supervisor = supervisor
+        self.config = config.model_copy(deep=True)
+        self.policy = copy(policy) if policy is not None else None
+        self.supervisor = copy(supervisor) if supervisor is not None else None
         self.sandbox = sandbox
-        self.task_authority = task_authority or TaskAuthority()
+        self.task_authority = (task_authority or TaskAuthority()).model_copy(deep=True)
+        self.compiled_authority = (
+            CompiledAuthority.compile(self.task_authority, tools.schemas())
+            if self.task_authority.enforcement_mode == "strict"
+            else None
+        )
         self.executed_calls: dict[str, list[ToolCall]] = {}
         self.escalated_tasks: set[str] = set()
         if self.policy is not None:
+            self.policy.config = self.policy.config.model_copy(deep=True)
             self.policy.task_authority = self.task_authority
         if config.deterministic_policy and policy is None:
             raise ValueError("deterministic policy is enabled but unavailable")
@@ -70,6 +80,12 @@ class TraceGuardRuntime:
             raise ValueError("LLM supervisor is enabled but unavailable")
 
     def execute_call(
+        self, user_task: str, call: ToolCall, observations: list[Observation]
+    ) -> RuntimeResult:
+        with self._lock:
+            return self._execute_call(user_task, call, observations)
+
+    def _execute_call(
         self, user_task: str, call: ToolCall, observations: list[Observation]
     ) -> RuntimeResult:
         started = time.monotonic()
@@ -146,6 +162,23 @@ class TraceGuardRuntime:
             validated=True,
             validation_reason="approved safeguard merge",
         )
+        if target is ExecutionTarget.SIMULATED or (
+            effective_call.tool_name == "restricted_command" and target is ExecutionTarget.DEFAULT
+        ):
+            # A simulation must never reach a real handler or execution ledger.
+            plan.target = ExecutionTarget.SIMULATED
+            observation = Observation(
+                content='{"status":"simulated","host_execution":false}',
+                source_type="simulation",
+                source_id=call.call_id,
+                trust=TrustLabel.UNTRUSTED_TOOL,
+                may_contain_instructions=False,
+                provenance_chain=[*call.consumed_observation_ids, call.call_id],
+            )
+            return RuntimeResult(
+                self._trace(call, effective_call, outputs, plan, observation, started, "SIMULATED"),
+                observation,
+            )
         if target is ExecutionTarget.CONTAINER:
             if self.sandbox is None:
                 trace = self._trace(call, effective_call, outputs, plan, None, started, "ESCALATE")
@@ -235,6 +268,13 @@ class TraceGuardRuntime:
         self, user_task: str, call: ToolCall, observations: list[Observation]
     ) -> list[SupervisorOutput]:
         outputs: list[SupervisorOutput] = []
+        if self.compiled_authority is not None:
+            checked = self.compiled_authority.evaluate(
+                user_task, call, observations, self.executed_calls.get(call.task_id, [])
+            )
+            outputs.append(checked)
+            if checked.decision in {Decision.BLOCK, Decision.ESCALATE}:
+                return outputs
         if self.config.deterministic_policy or self.config.llm_supervisor:
             repeated = duplicate_mutation(
                 call, self.executed_calls.get(call.task_id, []), self.task_authority
