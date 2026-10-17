@@ -62,6 +62,10 @@ jobs:
         env:
           TRACEGUARD_RUN_DOCKER_TESTS: "1"
       - run: docker build --build-arg PYTHON_IMAGE="$PYTHON_IMAGE" --tag traceguard:ci .
+      - name: Verify isolated mutually authenticated report execution
+        run: >-
+          uv run --no-sync python -m benchmarks.isolation_canary
+          --image traceguard:ci --output artifacts/isolation-canary.json
       - name: Reject missing API configuration
         run: |
           status=0
