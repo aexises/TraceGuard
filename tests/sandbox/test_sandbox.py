@@ -1,12 +1,13 @@
 import json
 import os
-import stat
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 
+from traceguard.data.sandbox.export import collect
 from traceguard.sandbox.config import load_sandbox_configuration
 from traceguard.sandbox.runner import (
     ContainerRunner,
@@ -59,6 +60,7 @@ class FakeDocker:
         self.digest_matches = digest_matches
         self.run_returncode = run_returncode
         self.on_run = None
+        self.output_root = None
 
     def __call__(self, command, **kwargs):
         self.commands.append(command)
@@ -75,6 +77,8 @@ class FakeDocker:
                 "",
             )
         if command[1] == "run":
+            if "--detach" in command:
+                return subprocess.CompletedProcess(command, 0, "fake-container", "")
             if self.on_run:
                 self.on_run(command)
             return subprocess.CompletedProcess(
@@ -83,7 +87,21 @@ class FakeDocker:
                 self.run_stdout,
                 self.run_stderr,
             )
+        if command[1] == "exec":
+            if len(command) > 6 and "def collect(root, limits)" in command[6]:
+                try:
+                    payload = collect(self.output_root, json.loads(command[-1]))
+                except (OSError, ValueError) as exc:
+                    return subprocess.CompletedProcess(command, 1, "", str(exc))
+                return subprocess.CompletedProcess(command, 0, json.dumps(payload), "")
+            if self.on_run:
+                self.on_run(command)
+            return subprocess.CompletedProcess(
+                command, self.run_returncode, self.run_stdout, self.run_stderr
+            )
         if command[1:3] == ["rm", "--force"]:
+            if self.output_root is not None:
+                shutil.rmtree(self.output_root, ignore_errors=True)
             return subprocess.CompletedProcess(command, 0, "", "")
         raise AssertionError(f"unexpected Docker command: {command}")
 
@@ -91,6 +109,8 @@ class FakeDocker:
 def runner(tmp_path: Path, fake: FakeDocker) -> ContainerRunner:
     workspace = tmp_path / "workspace"
     workspace.mkdir(exist_ok=True)
+    fake.output_root = tmp_path / "fake-private-tmpfs"
+    fake.output_root.mkdir(exist_ok=True, mode=0o700)
     return ContainerRunner(
         CONFIG_PATH,
         workspace_root=workspace,
@@ -258,7 +278,7 @@ def test_artifact_build_inspects_limits_persists_and_cleans_staging(tmp_path):
     fake = FakeDocker()
 
     def create_artifact(command):
-        output = mount_source(command, "/traceguard/output")
+        output = fake.output_root
         (output / "nested").mkdir()
         (output / "nested" / "report.txt").write_text("result", encoding="utf-8")
 
@@ -270,7 +290,7 @@ def test_artifact_build_inspects_limits_persists_and_cleans_staging(tmp_path):
     assert evidence.artifact_directory is not None
     persisted = Path(evidence.artifact_directory)
     assert (persisted / "nested" / "report.txt").read_text(encoding="utf-8") == "result"
-    staging_path = mount_source(docker_run(fake), "/traceguard/output")
+    staging_path = fake.output_root
     assert not staging_path.exists()
     assert any(command[1:3] == ["rm", "--force"] for command in fake.commands)
 
@@ -280,11 +300,12 @@ def test_artifact_output_is_writable_by_container_uid_despite_host_umask(tmp_pat
     fake = FakeDocker()
 
     def inspect_output_permissions(command):
-        output = mount_source(command, "/traceguard/output")
-        # Docker bind mounts retain host permissions; UID 65532 is not the host owner.
-        assert stat.S_IMODE(output.stat().st_mode) == 0o777
-        # Other host users still cannot traverse the private staging parent.
-        assert stat.S_IMODE(output.parent.stat().st_mode) == 0o700
+        output = fake.output_root
+        launch = docker_run(fake)
+        mount = next(value for value in launch if value.startswith("/traceguard/output:"))
+        assert "uid=65532,gid=65532,mode=0700" in mount
+        assert "nr_inodes=" in mount and "size=" in mount
+        assert not any("type=bind" in value and "/traceguard/output" in value for value in launch)
         (output / "result.txt").write_text("safe result", encoding="utf-8")
 
     fake.on_run = inspect_output_permissions
@@ -301,22 +322,22 @@ def test_artifact_build_fails_closed_on_oversized_or_symlink_output(tmp_path):
     fake = FakeDocker()
 
     def create_large_artifact(command):
-        output = mount_source(command, "/traceguard/output")
+        output = fake.output_root
         (output / "large.bin").write_bytes(b"x" * (8_388_608 + 1))
 
     fake.on_run = create_large_artifact
-    with pytest.raises(EvidenceCollectionError, match="per-file"):
+    with pytest.raises(EvidenceCollectionError, match="export"):
         runner(tmp_path, fake).execute(plan("artifact_build"))
     assert any(command[1:3] == ["rm", "--force"] for command in fake.commands)
 
     fake_link = FakeDocker()
 
     def create_link(command):
-        output = mount_source(command, "/traceguard/output")
+        output = fake_link.output_root
         (output / "escape").symlink_to("/etc/passwd")
 
     fake_link.on_run = create_link
-    with pytest.raises(EvidenceCollectionError, match="symbolic links"):
+    with pytest.raises(EvidenceCollectionError, match="export"):
         runner(tmp_path, fake_link).execute(plan("artifact_build"))
 
 

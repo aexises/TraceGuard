@@ -267,6 +267,10 @@ class TraceGuardRuntime:
             if self.config.post_run_reevaluation and self.supervisor:
                 post_run = self.supervisor.reevaluate(user_task, effective_call, evidence)
             if post_run and post_run.disposition is not PostRunDisposition.ACCEPT_RESULT:
+                if post_run.disposition is PostRunDisposition.BLOCK_RESULT and hasattr(
+                    self.sandbox, "reject_artifacts"
+                ):
+                    self.sandbox.reject_artifacts(evidence)
                 outcome = (
                     "ESCALATE"
                     if post_run.disposition

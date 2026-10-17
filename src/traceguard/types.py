@@ -166,6 +166,8 @@ class SandboxEvidence(StrictModel):
     files_changed: list[str] = Field(default_factory=list)
     artifact_bytes: int = Field(default=0, ge=0)
     artifact_directory: str | None = None
+    artifact_id: str | None = None
+    artifact_status: Literal["quarantined", "released", "rejected"] | None = None
     blocked_operations: list[str] = Field(default_factory=list)
     duration_ms: float = Field(default=0.0, ge=0.0)
     peak_memory_bytes: int | None = Field(default=None, ge=0)
