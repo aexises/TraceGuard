@@ -290,3 +290,30 @@ def test_approval_cannot_cross_task_or_override_terminal_policy_deny(tmp_path):
     with pytest.raises((AuthorizationError, ValueError)):
         issuer.issue(agent, action, "executor", decision.review_id)
     assert effects == []
+
+
+def test_unknown_effect_requires_provider_receipt_and_separate_reviewer(tmp_path):
+    from traceguard.executor import ProviderReceipt
+
+    def uncertain(_):
+        raise TimeoutError("effect unknown")
+
+    _, issuer, agent, factory, action, _ = configured(tmp_path, dispatch=uncertain)
+    executor = factory()
+    grant = issuer.issue(agent, action, "executor")
+    with pytest.raises(ExecutionUnknown):
+        executor.execute(agent, action, grant)
+    reviewer = actor("operator", Role.REVIEWER)
+    with pytest.raises(AuthorizationError):
+        executor.reconcile(reviewer, grant.nonce, "provider-receipt-1")
+    executor.reconcile_provider = lambda row, reference: ProviderReceipt(
+        row["digest"], reference, "succeeded", '{"status":"done","password":"FAKE_CANARY"}'
+    )
+    with pytest.raises(AuthorizationError):
+        executor.reconcile(agent, grant.nonce, "provider-receipt-1")
+    resolved = executor.reconcile(reviewer, grant.nonce, "provider-receipt-1")
+    assert resolved["status"] == "succeeded"
+    assert "FAKE_CANARY" not in resolved["result"]
+    assert executor.execute(agent, action, grant)["replayed"]
+    with pytest.raises(ValueError):
+        executor.reconcile(reviewer, grant.nonce, "provider-receipt-2")

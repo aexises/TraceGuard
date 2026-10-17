@@ -79,6 +79,8 @@ boundary = SecuredTools(
         argument_values={"write_report": {"path": "artifacts/report.txt"}},
         generated_fields={"write_report": ["content"]},
     ),
+    task_id="application-approved-task",
+    ledger_path=Path("private-state/effects.sqlite"),
 )
 # Supply model ToolCall proposals only to boundary.execute_call(...).
 ```

@@ -106,6 +106,8 @@ def test_strict_runtime_preserves_benign_generated_report_utility(tmp_path):
             argument_values={"write_report": {"path": "artifacts/report.txt"}},
             generated_fields={"write_report": ["content"]},
         ),
+        task_id="t",
+        ledger_path=tmp_path / "state" / "effects.sqlite",
     )
     proposed = ToolCall(
         task_id="t",
