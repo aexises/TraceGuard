@@ -131,8 +131,11 @@ Example cache configuration in application-owned code:
 
 ```python
 cache = SignedPolicyCache(
-    policy_public_key, tenant_id="tenant-a", audience="agent",
-    service_key_id="key-1", key_id="development-ed25519-v1",
+    policy_public_key,
+    tenant_id="tenant-a",
+    audience="agent",
+    service_key_id="key-1",
+    key_id="development-ed25519-v1",
 )
 ```
 
