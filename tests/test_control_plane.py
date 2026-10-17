@@ -41,7 +41,9 @@ def active_plane() -> tuple[ControlPlane, Actor]:
                     name="safe API",
                     priority=10,
                     match=RuleMatch(
-                        kind=ActionKind.HTTP, target_prefix="https://api.example.test/"
+                        kind=ActionKind.HTTP,
+                        operation="GET",
+                        target_prefix="https://api.example.test/",
                     ),
                     decision=Decision.ALLOW,
                     reason="approved destination",
@@ -127,7 +129,9 @@ def test_escalation_creates_resolvable_review_and_audit_verifies() -> None:
 
 def test_signed_cache_only_allows_explicit_cached_rules() -> None:
     plane, agent = active_plane()
-    cache = SignedPolicyCache(KEY)
+    cache = SignedPolicyCache(
+        plane.policy_public_key, tenant_id="tenant-a", audience="agent", service_key_id="key-1"
+    )
     cache.install(plane.signed_bundle("tenant-a", agent))
     assert cache.evaluate(
         ActionRequest(
@@ -151,9 +155,12 @@ def test_signed_cache_only_allows_explicit_cached_rules() -> None:
 
 def test_expired_or_tampered_bundle_fails_closed() -> None:
     plane, agent = active_plane()
-    bundle = plane.signed_bundle("tenant-a", agent, timedelta(seconds=-1))
+    bundle = plane.signed_bundle("tenant-a", agent)
+    bundle.expires_at = bundle.issued_at - timedelta(seconds=1)
     with pytest.raises(PolicyUnavailable):
-        SignedPolicyCache(KEY).install(bundle)
+        SignedPolicyCache(
+            plane.policy_public_key, tenant_id="tenant-a", audience="agent", service_key_id="key-1"
+        ).install(bundle)
 
 
 @pytest.mark.parametrize(

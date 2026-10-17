@@ -113,6 +113,12 @@ class PolicyRule(PublicModel):
             raise ValueError("REWRITE rules require a rewrite payload")
         if self.cache_eligible and self.decision is not Decision.ALLOW:
             raise ValueError("only ALLOW rules can be cache eligible")
+        if self.cache_eligible and (
+            self.match.kind is not ActionKind.HTTP
+            or self.match.operation not in {"GET", "HEAD"}
+            or not self.match.target_prefix
+        ):
+            raise ValueError("offline grants require an explicit HTTP GET/HEAD destination scope")
         return self
 
 
@@ -173,6 +179,8 @@ class AuditEvent(PublicModel):
     previous_hash: str | None = None
     event_hash: str
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    sequence: int = Field(ge=1)
+    schema_version: Literal["audit-v2"] = "audit-v2"
 
 
 class SignedPolicyBundle(PublicModel):
@@ -182,6 +190,10 @@ class SignedPolicyBundle(PublicModel):
     expires_at: datetime
     key_id: str
     signature: str
+    algorithm: Literal["Ed25519"] = "Ed25519"
+    audience: str
+    service_key_id: str
+    policy_epoch: int = Field(ge=1)
 
 
 class ResolveReviewRequest(PublicModel):

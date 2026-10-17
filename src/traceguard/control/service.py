@@ -8,9 +8,6 @@ adapters behind the same service boundary.
 from __future__ import annotations
 
 import hashlib
-import hmac
-import json
-import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from functools import wraps
@@ -31,26 +28,15 @@ from traceguard.control.models import (
     Role,
     SignedPolicyBundle,
 )
+from traceguard.control.signing import Signer, canonical
 from traceguard.policy.matching import matches, select_rule
+from traceguard.supervisor.redaction import redact_value
 
-_SECRET_PATTERN = re.compile(
-    r"(?i)\b(?:api[_-]?key|password|secret|token)\s*[:=]\s*['\"]?[^\s,'\"]+"
-)
-
-
-def _canonical(value: Any) -> bytes:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), default=str).encode()
+_canonical = canonical
 
 
 def redact(value: Any) -> Any:
-    """Redact common credential assignments without retaining source payloads by default."""
-    if isinstance(value, str):
-        return _SECRET_PATTERN.sub("[REDACTED_SECRET]", value)
-    if isinstance(value, list):
-        return [redact(item) for item in value]
-    if isinstance(value, dict):
-        return {str(key): redact(item) for key, item in value.items()}
-    return value
+    return redact_value(value)
 
 
 class AuthorizationError(PermissionError):
@@ -88,17 +74,31 @@ def synchronized(method):
 class ControlPlane:
     """A multi-tenant, fail-closed safety regulator service."""
 
-    def __init__(self, signing_key: bytes, *, key_id: str = "development-hmac-v1") -> None:
+    def __init__(self, signing_key: bytes, *, key_id: str = "development-ed25519-v1") -> None:
         if len(signing_key) < 32:
             raise ValueError("signing_key must be at least 32 bytes")
-        self._signing_key = signing_key
+        self._policy_signer = Signer(signing_key, "traceguard-policy-v1")
+        self._audit_signer = Signer(signing_key, "traceguard-audit-v2")
         self._key_id = key_id
         self._policies: dict[str, list[PolicyVersion]] = {}
         self._audits: dict[str, list[AuditEvent]] = {}
+        self._audit_heads: dict[str, tuple[int, str]] = {}
         self._reviews: dict[str, Review] = {}
         self._idempotent: dict[tuple[str, str, str, str], DecisionReceipt] = {}
         self._epochs: dict[str, int] = {}
         self._lock = RLock()
+
+    @property
+    def policy_public_key(self) -> bytes:
+        return self._policy_signer.public_key
+
+    @property
+    def audit_public_key(self) -> bytes:
+        return self._audit_signer.public_key
+
+    @property
+    def key_id(self) -> str:
+        return self._key_id
 
     @synchronized
     def create_draft(self, tenant_id: str, actor: Actor, draft: PolicyDraft) -> PolicyVersion:
@@ -216,7 +216,7 @@ class ControlPlane:
             self._reviews[review.review_id] = review
             result.review_id = review.review_id
             self._append_audit(
-                action.tenant_id, "review.created", actor.subject, review.model_dump()
+                action.tenant_id, "review.created", actor.subject, review.model_dump(mode="json")
             )
         self._idempotent[key] = DecisionReceipt(
             digest, epoch, datetime.now(UTC) + timedelta(minutes=5), result.model_copy(deep=True)
@@ -245,7 +245,9 @@ class ControlPlane:
         review.resolution = resolution
         review.resolved_by = actor.subject
         review.reason = reason
-        self._append_audit(tenant_id, "review.resolved", actor.subject, review.model_dump())
+        self._append_audit(
+            tenant_id, "review.resolved", actor.subject, review.model_dump(mode="json")
+        )
         return review.model_copy(deep=True)
 
     def active_policy(self, tenant_id: str) -> PolicyVersion | None:
@@ -262,12 +264,26 @@ class ControlPlane:
 
     @synchronized
     def signed_bundle(
-        self, tenant_id: str, actor: Actor, ttl: timedelta = timedelta(minutes=15)
+        self, tenant_id: str, actor: Actor, ttl: timedelta = timedelta(minutes=5)
     ) -> SignedPolicyBundle:
         self._require(actor, Role.AGENT, tenant_id)
+        if actor.service_key_id is None:
+            raise AuthorizationError("bundle requires a scoped service credential")
+        if not timedelta(0) < ttl <= timedelta(minutes=5):
+            raise ValueError("offline bundle TTL must be within five minutes")
         policy = self.active_policy(tenant_id)
         if policy is None:
             raise ValueError("no active policy")
+        if actor.allowed_operations is not None:
+            permitted = [
+                rule
+                for rule in policy.draft.rules
+                if rule.decision is not Decision.ALLOW
+                or rule.match.operation in actor.allowed_operations
+            ]
+            if not permitted:
+                raise ValueError("no policy within credential operation scope")
+            policy.draft.rules = permitted
         issued_at = datetime.now(UTC)
         expires_at = issued_at + ttl
         bundle = SignedPolicyBundle(
@@ -277,46 +293,50 @@ class ControlPlane:
             expires_at=expires_at,
             key_id=self._key_id,
             signature="",
+            audience=actor.subject,
+            service_key_id=actor.service_key_id,
+            policy_epoch=self._epochs[tenant_id],
         )
         unsigned = bundle.model_dump(mode="json", exclude={"signature"})
-        bundle.signature = hmac.new(
-            self._signing_key, _canonical(unsigned), hashlib.sha256
-        ).hexdigest()
+        bundle.signature = self._policy_signer.sign(unsigned)
         return bundle
 
     @synchronized
     def export_audit(self, tenant_id: str, actor: Actor) -> dict[str, Any]:
         self._require(actor, Role.AUDITOR, tenant_id)
+        if not self.verify_audit_chain(tenant_id):
+            raise ValueError("audit integrity check failed")
         events = self._audits.get(tenant_id, [])
         payload = {
             "tenant_id": tenant_id,
             "events": [event.model_dump(mode="json") for event in events],
+            "count": len(events),
+            "head_hash": events[-1].event_hash if events else None,
+            "schema_version": "audit-v2",
         }
         return {
             **payload,
-            "signature": hmac.new(
-                self._signing_key, _canonical(payload), hashlib.sha256
-            ).hexdigest(),
-            "key_id": self._key_id,
+            "signature": self._audit_signer.sign(payload),
+            "key_id": self._key_id + ":audit-v2",
+            "algorithm": "Ed25519",
         }
 
     def verify_audit_chain(self, tenant_id: str) -> bool:
-        """Verify the tenant's append-only chain before export or external attestation."""
-        previous: str | None = None
-        for event in self._audits.get(tenant_id, []):
-            body = {
-                "tenant_id": event.tenant_id,
-                "event_type": event.event_type,
-                "actor": event.actor,
-                "payload": event.payload,
-                "previous_hash": previous,
-            }
-            if event.previous_hash != previous:
-                return False
-            if event.event_hash != hashlib.sha256(_canonical(body)).hexdigest():
-                return False
-            previous = event.event_hash
-        return True
+        with self._lock:
+            previous = None
+            events = self._audits.get(tenant_id, [])
+            for index, event in enumerate(events, 1):
+                if event.previous_hash != previous or event.sequence != index:
+                    return False
+                body = event.model_dump(mode="json", exclude={"event_hash"})
+                if event.event_hash != hashlib.sha256(_canonical(body)).hexdigest():
+                    return False
+                previous = event.event_hash
+            return (
+                self._audit_heads.get(tenant_id) == (len(events), previous)
+                if events
+                else tenant_id not in self._audit_heads
+            )
 
     def _decision(
         self,
@@ -352,15 +372,20 @@ class ControlPlane:
     ) -> AuditEvent:
         events = self._audits.setdefault(tenant_id, [])
         previous = events[-1].event_hash if events else None
-        body = {
-            "tenant_id": tenant_id,
-            "event_type": event_type,
-            "actor": actor,
-            "payload": payload,
-            "previous_hash": previous,
-        }
-        event = AuditEvent(**body, event_hash=hashlib.sha256(_canonical(body)).hexdigest())
+        event = AuditEvent(
+            tenant_id=tenant_id,
+            event_type=event_type,
+            actor=actor,
+            payload=redact(payload),
+            previous_hash=previous,
+            sequence=len(events) + 1,
+            event_hash="",
+        )
+        event.event_hash = hashlib.sha256(
+            _canonical(event.model_dump(mode="json", exclude={"event_hash"}))
+        ).hexdigest()
         events.append(event)
+        self._audit_heads[tenant_id] = (len(events), event.event_hash)
         return event
 
     @staticmethod

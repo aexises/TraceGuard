@@ -2,13 +2,9 @@
 
 from __future__ import annotations
 
-import hashlib
-import hmac
-import json
-from datetime import UTC, datetime
-from typing import Any
-from urllib.error import URLError
-from urllib.request import Request, urlopen
+from datetime import UTC, datetime, timedelta
+from urllib.error import HTTPError, URLError
+from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 from traceguard.control.models import (
     ActionKind,
@@ -18,38 +14,78 @@ from traceguard.control.models import (
     HttpAction,
     SignedPolicyBundle,
 )
+from traceguard.control.service import action_digest
+from traceguard.control.signing import verify
 from traceguard.policy.matching import select_rule
 from traceguard.policy.network import PublicHTTPTransport
 
 
-def _canonical(value: Any) -> bytes:
-    return json.dumps(value, sort_keys=True, separators=(",", ":"), default=str).encode()
-
-
 class PolicyUnavailable(RuntimeError):
-    """Raised when neither the control plane nor a valid safe cache can decide."""
+    """Neither remote policy nor a scoped read-only offline grant can decide."""
+
+
+class NoRedirects(HTTPRedirectHandler):
+    def redirect_request(self, request, fp, code, msg, headers, newurl):
+        return None
+
+
+urlopen = build_opener(ProxyHandler({}), NoRedirects()).open
 
 
 class SignedPolicyCache:
-    def __init__(self, signing_key: bytes) -> None:
-        self._signing_key = signing_key
-        self._bundle: SignedPolicyBundle | None = None
+    def __init__(
+        self,
+        public_key: bytes,
+        *,
+        tenant_id: str,
+        audience: str,
+        service_key_id: str,
+        key_id: str = "development-ed25519-v1",
+        minimum_epoch: int = 0,
+    ) -> None:
+        self._public_key = public_key
+        self.tenant_id, self.audience = tenant_id, audience
+        self.service_key_id, self.key_id = service_key_id, key_id
+        self._minimum_epoch = minimum_epoch
+        self._bundle_json: str | None = None
 
     def install(self, bundle: SignedPolicyBundle) -> None:
         unsigned = bundle.model_dump(mode="json", exclude={"signature"})
-        expected = hmac.new(self._signing_key, _canonical(unsigned), hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(expected, bundle.signature):
-            raise PolicyUnavailable("policy bundle signature is invalid")
-        if bundle.expires_at <= datetime.now(UTC):
-            raise PolicyUnavailable("policy bundle has expired")
-        self._bundle = bundle.model_copy(deep=True)
+        if bundle.key_id != self.key_id or not verify(self._public_key, unsigned, bundle.signature):
+            raise PolicyUnavailable("policy bundle signature or key is invalid")
+        if (
+            bundle.tenant_id != self.tenant_id
+            or bundle.policy.tenant_id != self.tenant_id
+            or bundle.audience != self.audience
+            or bundle.service_key_id != self.service_key_id
+            or bundle.policy.status.value != "active"
+            or bundle.policy_epoch < self._minimum_epoch
+        ):
+            raise PolicyUnavailable("policy bundle audience, scope or epoch is invalid")
+        now = datetime.now(UTC)
+        if (
+            bundle.issued_at.tzinfo is None
+            or bundle.expires_at.tzinfo is None
+            or bundle.expires_at <= now
+            or bundle.issued_at > now + timedelta(seconds=30)
+            or not timedelta(0) < bundle.expires_at - bundle.issued_at <= timedelta(minutes=5)
+        ):
+            raise PolicyUnavailable("policy bundle lifetime is invalid or expired")
+        self._bundle_json = bundle.model_dump_json()
+        self._minimum_epoch = bundle.policy_epoch
 
     def evaluate(self, action: ActionRequest) -> DecisionResponse:
-        bundle = self._bundle
-        if bundle is None or bundle.tenant_id != action.tenant_id:
-            raise PolicyUnavailable("no policy bundle for tenant")
-        if bundle.expires_at <= datetime.now(UTC):
-            raise PolicyUnavailable("policy bundle has expired")
+        if self._bundle_json is None:
+            raise PolicyUnavailable("no signed bundle is installed")
+        bundle = SignedPolicyBundle.model_validate_json(self._bundle_json)
+        if bundle.expires_at <= datetime.now(UTC) or action.tenant_id != self.tenant_id:
+            raise PolicyUnavailable("policy bundle has expired or tenant mismatches")
+        if (
+            action.kind is not ActionKind.HTTP
+            or action.operation not in {"GET", "HEAD"}
+            or action.arguments.get("json") is not None
+        ):
+            raise PolicyUnavailable("offline authorization supports read-only HTTP only")
         rule = select_rule(bundle.policy, action)
         if rule is not None and rule.decision is Decision.ALLOW and rule.cache_eligible:
             return DecisionResponse(
@@ -59,6 +95,7 @@ class SignedPolicyCache:
                 policy_version=bundle.policy.version,
                 audit_id="cache-pending-reconciliation",
                 from_cache=True,
+                action_digest=action_digest(action),
             )
         raise PolicyUnavailable("cached policy cannot authorize this action")
 
@@ -91,22 +128,51 @@ class TraceGuardClient:
             method="POST",
         )
         try:
-            with urlopen(request, timeout=5) as response:  # nosec B310: URL is caller-configured control plane
-                return DecisionResponse.model_validate_json(response.read())
+            return self._remote(request, action)
+        except HTTPError as exc:
+            raise PolicyUnavailable(
+                f"control plane explicitly rejected request ({exc.code})"
+            ) from exc
         except (OSError, URLError, TimeoutError) as exc:
+            import ssl
+
+            if isinstance(getattr(exc, "reason", exc), ssl.SSLError):
+                raise PolicyUnavailable("control-plane TLS verification failed") from exc
             if self.cache is None:
                 raise PolicyUnavailable(
                     "control plane unavailable and no signed cache is installed"
                 ) from exc
             decision = self.cache.evaluate(action)
-            self._offline_events.append(action)
+            if len(self._offline_events) >= 1000:
+                raise PolicyUnavailable("offline decision reconciliation queue is full") from exc
+            self._offline_events.append(action.model_copy(deep=True))
             return decision
 
+    def _remote(self, request: Request, action: ActionRequest) -> DecisionResponse:
+        with urlopen(request, timeout=5) as response:
+            payload = response.read(1_048_577)
+        if len(payload) > 1_048_576:
+            raise PolicyUnavailable("control-plane response exceeds limit")
+        decision = DecisionResponse.model_validate_json(payload)
+        if decision.action_digest != action_digest(action):
+            raise PolicyUnavailable("control-plane decision does not bind the requested action")
+        return decision
+
     def reconcile(self) -> list[DecisionResponse]:
-        events, self._offline_events = self._offline_events, []
-        results: list[DecisionResponse] = []
-        for action in events:
-            results.append(self.evaluate(action))
+        results = []
+        while self._offline_events:
+            action = self._offline_events[0]
+            request = Request(
+                f"{self.base_url}/v1/actions/evaluate",
+                data=action.model_dump_json().encode(),
+                headers={
+                    "Authorization": f"Bearer {self.bearer_token}",
+                    "Content-Type": "application/json",
+                },
+                method="POST",
+            )
+            results.append(self._remote(request, action))
+            self._offline_events.pop(0)
         return results
 
     def request_http(self, tenant_id: str, idempotency_key: str, request: HttpAction) -> bytes:

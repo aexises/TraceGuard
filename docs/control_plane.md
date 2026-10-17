@@ -10,7 +10,7 @@ evidence adapter, KMS-backed signing/encryption, a queue worker, and an OIDC ide
 resolver before handling production traffic. The included `token_resolver` is a test and
 development adapter only; it is not an OIDC implementation.
 
-The SDK can fall back only to a valid HMAC-signed cached policy bundle and only for rules
+The SDK can fall back only to a valid Ed25519-signed cached policy bundle and only for rules
 explicitly marked `cache_eligible`. Escalations, blocks, expired bundles, unknown actions,
 and control-plane outages without a qualifying cached rule all remain blocked.
 
@@ -108,3 +108,35 @@ proxy environment variables are ignored, response bytes are bounded and redirect
 rejected. A new destination must be explicitly evaluated. Unsafe Host/framing headers
 cannot replace the evaluated authority. Network tests use fake DNS/connections, not
 external sites; live public-service integration remains a separate release gate.
+
+
+## Offline grants and audit-v2 migration
+
+The cache accepts a pinned Ed25519 **public verification key**, tenant, audience, service
+credential ID and key ID. It receives no signing secret. Bundles have at most five minutes
+of validity, carry a monotonically checked activation epoch and can authorize only explicit
+HTTP GET/HEAD rules. Auth/authorization/schema/throttle HTTP errors and TLS failures never
+trigger fallback. Offline policy revocation can still lag until expiry; do not use offline
+grants for consequential effects. Reconciliation keeps unacknowledged decisions on failure;
+it reconciles decisions, not proof that an external effect actually occurred.
+
+Policy and audit keys are purpose-separated. The development backend derives them from
+the configured high-entropy seed; KMS/rotation and durable revocation remain release work.
+Audit-v2 hashes event ID, timestamp, sequence and complete canonical event metadata. Export
+verifies the chain and signs its count/head with the separate audit identity. Process-local
+head checks detect local corruption/truncation, but independent durable checkpoints and
+storage access control remain necessary for production tamper evidence.
+
+Example cache configuration in application-owned code:
+
+```python
+cache = SignedPolicyCache(
+    policy_public_key, tenant_id="tenant-a", audience="agent",
+    service_key_id="key-1", key_id="development-ed25519-v1",
+)
+```
+
+Obtain/pin `policy_public_key` through trusted deployment configuration, not the same
+unauthenticated response carrying the bundle. Recreate the cache with approved keys and a
+trusted minimum epoch during rotation. A valid signature does not authenticate arbitrary
+retrieved evidence or attest to tool correctness.

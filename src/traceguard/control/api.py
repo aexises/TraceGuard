@@ -17,7 +17,7 @@ from traceguard.control.models import (
     ResolveReviewRequest,
     Role,
 )
-from traceguard.control.service import AuthorizationError, ControlPlane, IdempotencyConflict, redact
+from traceguard.control.service import AuthorizationError, ControlPlane, IdempotencyConflict
 
 IdentityResolver = Callable[[str | None], Actor]
 
@@ -63,7 +63,7 @@ def create_app(control: ControlPlane, identity: IdentityResolver) -> FastAPI:
 
     @app.get("/v1/policies/bundle")
     def policy_bundle(tenant_id: str, current: Actor = Depends(actor)) -> dict[str, Any]:
-        return control.signed_bundle(tenant_id, current, timedelta(minutes=15)).model_dump(
+        return control.signed_bundle(tenant_id, current, timedelta(minutes=5)).model_dump(
             mode="json"
         )
 
@@ -111,7 +111,7 @@ def create_app(control: ControlPlane, identity: IdentityResolver) -> FastAPI:
             idempotency_key=request.headers.get("Idempotency-Key", ""),
             kind="model_request",
             operation="chat.completions",
-            arguments={"model": payload.get("model"), "messages": redact(messages)},
+            arguments={"model": payload.get("model"), "messages": messages},
         )
         decision = control.evaluate(current, action)
         if decision.decision.value != "ALLOW":
