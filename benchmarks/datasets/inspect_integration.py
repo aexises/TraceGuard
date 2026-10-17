@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from copy import deepcopy
+from dataclasses import replace
 from typing import Any
 from uuid import NAMESPACE_URL, uuid5
 
@@ -16,7 +18,7 @@ def inspect_standard_tools(
     """Return maintained Inspect tools; terminal capability is explicit."""
     try:
         from inspect_ai.tool import (
-            bash_session,
+            bash,
             grep,
             list_files,
             python,
@@ -36,7 +38,7 @@ def inspect_standard_tools(
                 grep(timeout=30),
                 text_editor(timeout=30),
                 python(timeout=30),
-                bash_session(timeout=30),
+                bash(timeout=30),
             ]
         )
     if memory:
@@ -80,11 +82,10 @@ def traceguard_inspect_approver(
         if decision.decision is Decision.ALLOW:
             return Approval(decision="approve", explanation=decision.reason, metadata=metadata)
         if decision.decision is Decision.REWRITE and decision.rewritten_call is not None:
-            modified = call.model_copy(
-                update={
-                    "function": decision.rewritten_call.tool_name,
-                    "arguments": decision.rewritten_call.arguments,
-                }
+            modified = replace(
+                call,
+                function=decision.rewritten_call.tool_name,
+                arguments=deepcopy(decision.rewritten_call.arguments),
             )
             return Approval(
                 decision="modify",

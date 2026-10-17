@@ -45,6 +45,28 @@ See `isolated_executor.md` for conformance and target-platform trust assumptions
 See `security_evaluation.md` for the implemented evaluation contract and the external
 held-out/adaptive measurements still required. No new live-model efficacy result is claimed.
 
-Still to deliver: release security
-evidence and support policy. External reviewers and application pilots are not arranged.
-The repository owner's distribution license decision remains pending.
+Release assurance now includes a private reporting route, support policy, pinned
+history/source secret scanning, core/all-extra advisory scanning and dependency
+SBOMs, immutable Action references, and a source-bound evidence gate before candidate
+artifact attestations. See `release_assurance.md` for commands and the review/pilot packet.
+External reviewers, application pilots, independent held-out results and the owner's
+distribution license decision remain pending. These are release blockers, not completed
+validation. The manual candidate signing workflow has not been executed.
+
+The seven follow-up PRs are stacked in order: #21 staging/strict mode, #22 durable
+effects, #23 persistent authority, #24 sandbox/data release, #25 isolated execution,
+#26 effect-grounded evaluation, then release assurance. They must be reviewed and
+merged in dependency order; draft publication is not deployment or independent review.
+
+Local validation of the final stack on October 17: 464 tests passed with Docker
+canaries enabled and optional Inspect installed; Ruff and formatting passed; source
+and wheel distributions built; a fresh hash-locked Python 3.12 runtime installed the
+wheel and passed smoke/resource checks outside the checkout. The final locked image
+passed the three-container report canary before/after issuer restart. Core (21),
+all-extra (147), native Inspect (97) and native AgentDyn (147) resolved registry
+dependency records had no known advisory findings at scan time. Redacted history
+and publication-source scans had no findings. The two pinned upstream VCS benchmark
+packages are outside registry advisory coverage and are recorded in the scan report.
+Fresh native AgentDyn installation, suite loading and provider imports passed without
+a model. The release-evidence command exited with a missing-evidence error as intended.
+These checks do not establish live-model efficacy or independent assurance.

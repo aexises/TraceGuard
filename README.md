@@ -1,5 +1,9 @@
 # TraceGuard
 
+Experimental security framework; no supported production release yet. See
+[security reporting](SECURITY.md), [implementation completion](docs/security_completion.md),
+and [release assurance commands and remaining gates](docs/release_assurance.md).
+
 TraceGuard is a research platform for evaluating and enforcing safeguards around
 tool-using AI agents. It has two complementary components:
 

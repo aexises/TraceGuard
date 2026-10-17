@@ -9,7 +9,7 @@ description = "Safety control plane for governing AI model and agent actions"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-  "cryptography>=43,<50",
+  "cryptography>=50.0.2,<51",
   "fastapi>=0.115,<1",
   "pydantic>=2.7,<3",
   "jsonschema==4.25.1",
@@ -28,7 +28,7 @@ dev = [
 agentdojo = ["agentdojo==0.1.35"]
 datasets = ["datasketch==2.0.0"]
 inspect = [
-  "inspect-ai==0.3.248",
+  "inspect-ai==0.3.281",
   "inspect-evals==0.15.0",
 ]
 

@@ -19,8 +19,10 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: ${{ matrix.python-version }}
       - run: python -m pip install uv==0.13.1
@@ -48,8 +50,10 @@ jobs:
   container:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.11"
       - run: python -m pip install uv==0.13.1
@@ -91,9 +95,9 @@ jobs:
             --release-image "registry.invalid/traceguard@$IMAGE_ID" \
             --output-manifest artifacts/control-plane.yaml
           # This image ID is a schema-only fixture, not a deployable registry manifest digest.
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
-          go-version: "1.23"
+          go-version: "1.27.2"
       - run: go install github.com/yannh/kubeconform/cmd/kubeconform@v0.6.7
       - run: kubeconform -strict -summary -kubernetes-version 1.27.0 artifacts/control-plane.yaml
       - name: Cleanup
