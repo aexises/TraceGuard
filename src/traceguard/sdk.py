@@ -19,6 +19,7 @@ from traceguard.control.models import (
     SignedPolicyBundle,
 )
 from traceguard.control.service import ControlPlane
+from traceguard.policy.network import PublicHTTPTransport
 
 
 def _canonical(value: Any) -> bytes:
@@ -68,11 +69,17 @@ class TraceGuardClient:
     """HTTP client with fail-closed remote evaluation and signed cache fallback."""
 
     def __init__(
-        self, base_url: str, bearer_token: str, cache: SignedPolicyCache | None = None
+        self,
+        base_url: str,
+        bearer_token: str,
+        cache: SignedPolicyCache | None = None,
+        *,
+        http_transport: PublicHTTPTransport | None = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.bearer_token = bearer_token
         self.cache = cache
+        self.http_transport = http_transport or PublicHTTPTransport()
         self._offline_events: list[ActionRequest] = []
 
     def evaluate(self, action: ActionRequest) -> DecisionResponse:
@@ -105,6 +112,7 @@ class TraceGuardClient:
         return results
 
     def request_http(self, tenant_id: str, idempotency_key: str, request: HttpAction) -> bytes:
+        request = request.model_copy(deep=True)
         action = ActionRequest(
             tenant_id=tenant_id,
             idempotency_key=idempotency_key,
@@ -116,9 +124,6 @@ class TraceGuardClient:
         decision = self.evaluate(action)
         if decision.decision is not Decision.ALLOW:
             raise PermissionError(f"TraceGuard denied HTTP action: {decision.reason}")
-        body = json.dumps(request.json_body).encode() if request.json_body is not None else None
-        outbound = Request(
-            str(request.url), data=body, headers=request.headers, method=request.method.upper()
+        return self.http_transport.request(
+            request.method.upper(), str(request.url), dict(request.headers), request.json_body
         )
-        with urlopen(outbound, timeout=15) as response:  # nosec B310: policy governs the destination
-            return response.read()

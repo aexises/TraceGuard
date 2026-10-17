@@ -92,3 +92,19 @@ requires a new key; a cached ALLOW never authorizes work under a changed policy.
 request timestamps/action IDs are not semantic payload. Responses include `action_digest`.
 These are decision receipts, not proof of execution or an exactly-once side-effect guarantee.
 The development store serializes policy/decision updates within one process only.
+
+
+## Public HTTP execution profile
+
+HTTP target rules now compare parsed origins (scheme, host and effective port), path
+segment boundaries and exact query strings. Userinfo, fragments, path traversal/encoded
+aliases, control characters and ambiguous authority forms are denied. A query omitted
+from a scope grants no arbitrary query parameters. Non-HTTP legacy target prefixes are
+not advertised as filesystem/object authorization.
+
+`TraceGuardClient.request_http` defaults to public HTTPS transport: DNS answers must all
+be public, the socket uses a validated IP while TLS authenticates the original hostname,
+proxy environment variables are ignored, response bytes are bounded and redirects are
+rejected. A new destination must be explicitly evaluated. Unsafe Host/framing headers
+cannot replace the evaluated authority. Network tests use fake DNS/connections, not
+external sites; live public-service integration remains a separate release gate.

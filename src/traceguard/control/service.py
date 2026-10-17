@@ -32,6 +32,7 @@ from traceguard.control.models import (
     RuleMatch,
     SignedPolicyBundle,
 )
+from traceguard.policy.network import target_within_scope
 
 _SECRET_PATTERN = re.compile(
     r"(?i)\b(?:api[_-]?key|password|secret|token)\s*[:=]\s*['\"]?[^\s,'\"]+"
@@ -343,10 +344,12 @@ class ControlPlane:
             return False
         if match.operation is not None and match.operation != action.operation:
             return False
-        if match.target_prefix is not None and not (action.target or "").startswith(
-            match.target_prefix
-        ):
-            return False
+        if match.target_prefix is not None:
+            if action.kind.value == "http":
+                if not target_within_scope(match.target_prefix, action.target or ""):
+                    return False
+            elif not (action.target or "").startswith(match.target_prefix):
+                return False
         if any(action.arguments.get(key) != value for key, value in match.argument_equals.items()):
             return False
         has_instruction = any(
