@@ -135,8 +135,14 @@ def _development_app() -> FastAPI:
         raise RuntimeError(
             "TRACEGUARD_DEV_TOKEN must be a dedicated token of at least 32 characters"
         )
+    tenant = os.environ.get("TRACEGUARD_DEV_TENANT", "tenant-a")
     tokens = {
-        token: Actor(subject="development-agent", roles={Role.AGENT}, service_key_id="development")
+        token: Actor(
+            subject="development-agent",
+            roles={Role.AGENT},
+            service_key_id="development",
+            tenant_ids={tenant},
+        )
     }
     return create_app(ControlPlane(key.encode()), token_resolver(tokens))
 

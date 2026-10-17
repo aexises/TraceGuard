@@ -71,7 +71,7 @@ class ControlPlane:
         self._idempotent: dict[tuple[str, str], DecisionResponse] = {}
 
     def create_draft(self, tenant_id: str, actor: Actor, draft: PolicyDraft) -> PolicyVersion:
-        self._require(actor, Role.ADMIN)
+        self._require(actor, Role.ADMIN, tenant_id)
         versions = self._policies.setdefault(tenant_id, [])
         policy = PolicyVersion(
             tenant_id=tenant_id,
@@ -86,7 +86,7 @@ class ControlPlane:
         return policy
 
     def submit_policy(self, tenant_id: str, actor: Actor, policy_id: str) -> PolicyVersion:
-        self._require(actor, Role.ADMIN)
+        self._require(actor, Role.ADMIN, tenant_id)
         policy = self._policy(tenant_id, policy_id)
         if policy.created_by != actor.subject:
             raise AuthorizationError("only the policy author may submit this draft")
@@ -97,7 +97,7 @@ class ControlPlane:
         return policy
 
     def approve_policy(self, tenant_id: str, actor: Actor, policy_id: str) -> PolicyVersion:
-        self._require(actor, Role.APPROVER)
+        self._require(actor, Role.APPROVER, tenant_id)
         policy = self._policy(tenant_id, policy_id)
         if policy.status is not PolicyStatus.PENDING_APPROVAL:
             raise ValueError("policy is not pending approval")
@@ -113,7 +113,7 @@ class ControlPlane:
         return policy
 
     def rollback(self, tenant_id: str, actor: Actor, policy_id: str) -> PolicyVersion:
-        self._require(actor, Role.APPROVER)
+        self._require(actor, Role.APPROVER, tenant_id)
         target = self._policy(tenant_id, policy_id)
         if target.status is not PolicyStatus.ROLLED_BACK:
             raise ValueError("only a historical policy can be restored")
@@ -127,7 +127,12 @@ class ControlPlane:
         return target
 
     def evaluate(self, actor: Actor, action: ActionRequest) -> DecisionResponse:
-        self._require(actor, Role.AGENT)
+        self._require(actor, Role.AGENT, action.tenant_id)
+        if (
+            actor.allowed_operations is not None
+            and action.operation not in actor.allowed_operations
+        ):
+            raise AuthorizationError("operation is outside the service credential scope")
         if actor.service_key_id is None:
             raise AuthorizationError("agent actions require a scoped service credential")
         key = (action.tenant_id, action.idempotency_key)
@@ -181,7 +186,7 @@ class ControlPlane:
         resolution: ReviewResolution,
         reason: str,
     ) -> Review:
-        self._require(actor, Role.REVIEWER)
+        self._require(actor, Role.REVIEWER, tenant_id)
         review = self._reviews.get(review_id)
         if review is None or review.tenant_id != tenant_id:
             raise KeyError("review not found")
@@ -210,7 +215,7 @@ class ControlPlane:
     def signed_bundle(
         self, tenant_id: str, actor: Actor, ttl: timedelta = timedelta(minutes=15)
     ) -> SignedPolicyBundle:
-        self._require(actor, Role.AGENT)
+        self._require(actor, Role.AGENT, tenant_id)
         policy = self.active_policy(tenant_id)
         if policy is None:
             raise ValueError("no active policy")
@@ -231,7 +236,7 @@ class ControlPlane:
         return bundle
 
     def export_audit(self, tenant_id: str, actor: Actor) -> dict[str, Any]:
-        self._require(actor, Role.AUDITOR)
+        self._require(actor, Role.AUDITOR, tenant_id)
         events = self._audits.get(tenant_id, [])
         payload = {
             "tenant_id": tenant_id,
@@ -331,6 +336,8 @@ class ControlPlane:
         return event
 
     @staticmethod
-    def _require(actor: Actor, role: Role) -> None:
+    def _require(actor: Actor, role: Role, tenant_id: str) -> None:
+        if tenant_id not in actor.tenant_ids:
+            raise AuthorizationError("principal is not authorized for this tenant")
         if role not in actor.roles:
             raise AuthorizationError(f"missing required role: {role.value}")
