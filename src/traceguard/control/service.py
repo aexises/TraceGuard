@@ -8,6 +8,7 @@ adapters behind the same service boundary.
 from __future__ import annotations
 
 import hashlib
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from functools import wraps
@@ -65,7 +66,7 @@ class DecisionReceipt:
 def synchronized(method):
     @wraps(method)
     def locked(self, *args, **kwargs):
-        with self._lock:
+        with self.transaction():
             return method(self, *args, **kwargs)
 
     return locked
@@ -86,7 +87,38 @@ class ControlPlane:
         self._reviews: dict[str, Review] = {}
         self._idempotent: dict[tuple[str, str, str, str], DecisionReceipt] = {}
         self._epochs: dict[str, int] = {}
+        self._execution_signer = Signer(signing_key, "traceguard-execution-v1")
+        self._execution_tasks: dict[tuple[str, str], Any] = {}
+        self._execution_issued: dict[str, str] = {}
+        self._revoked_credentials: set[tuple[str, str]] = set()
+        self._suspended_tenants: set[str] = set()
         self._lock = RLock()
+
+    @contextmanager
+    def transaction(self):
+        with self._lock:
+            yield
+
+    @synchronized
+    def revoke_credential(self, tenant_id: str, actor: Actor, credential_id: str) -> None:
+        self._require(actor, Role.ADMIN, tenant_id)
+        if not credential_id or len(credential_id) > 256:
+            raise ValueError("invalid credential ID")
+        self._revoked_credentials.add((tenant_id, credential_id))
+        self._epochs[tenant_id] = self._epochs.get(tenant_id, 0) + 1
+        self._append_audit(
+            tenant_id, "credential.revoked", actor.subject, {"credential_id": credential_id}
+        )
+
+    @synchronized
+    def suspend_tenant(self, tenant_id: str, actor: Actor, suspended: bool = True) -> None:
+        self._require(actor, Role.ADMIN, tenant_id)
+        if suspended:
+            self._suspended_tenants.add(tenant_id)
+        else:
+            self._suspended_tenants.discard(tenant_id)
+        self._epochs[tenant_id] = self._epochs.get(tenant_id, 0) + 1
+        self._append_audit(tenant_id, "tenant.suspension", actor.subject, {"suspended": suspended})
 
     @property
     def policy_public_key(self) -> bytes:
@@ -262,7 +294,7 @@ class ControlPlane:
         return review.model_copy(deep=True)
 
     def active_policy(self, tenant_id: str) -> PolicyVersion | None:
-        with self._lock:
+        with self.transaction():
             policy = next(
                 (
                     item
@@ -333,7 +365,7 @@ class ControlPlane:
         }
 
     def verify_audit_chain(self, tenant_id: str) -> bool:
-        with self._lock:
+        with self.transaction():
             previous = None
             events = self._audits.get(tenant_id, [])
             for index, event in enumerate(events, 1):
@@ -399,9 +431,12 @@ class ControlPlane:
         self._audit_heads[tenant_id] = (len(events), event.event_hash)
         return event
 
-    @staticmethod
-    def _require(actor: Actor, role: Role, tenant_id: str) -> None:
+    def _require(self, actor: Actor, role: Role, tenant_id: str) -> None:
         if tenant_id not in actor.tenant_ids:
             raise AuthorizationError("principal is not authorized for this tenant")
         if role not in actor.roles:
             raise AuthorizationError(f"missing required role: {role.value}")
+        if role in {Role.AGENT, Role.EXECUTOR} and tenant_id in self._suspended_tenants:
+            raise AuthorizationError("tenant execution is suspended")
+        if actor.service_key_id and (tenant_id, actor.service_key_id) in self._revoked_credentials:
+            raise AuthorizationError("service credential is revoked")
