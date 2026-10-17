@@ -94,6 +94,10 @@ research grammar with explicit grants; they do not reproduce CaMeL/Progent or pr
 live-model effectiveness. See `docs/security_framework.md` for the security contract,
 reference comparison and remaining release gates.
 
+For action-bound grant issuance, durable execution reservations and human review, see
+[the execution contract](docs/execution_grants.md). The isolated-executor deployment
+profile still requires actual process, credential and egress isolation.
+
 ## How it works
 
 For each proposed tool call, TraceGuard combines structured tool definitions,

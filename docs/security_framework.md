@@ -82,7 +82,7 @@ is supported by the development conformance comparison.
 **Release gates still open after the initial PR series**
 
 Independent security review; genuine authentication/source identity; deployment-enforced
-credential/egress isolation; durable transactional execution/recovery; bounded sandbox
+credential/egress isolation; production issuer persistence and provider recovery; bounded sandbox
 disk/inodes and staged inputs; artifact quarantine/release; final-answer/model-provider
 data release; wider held-out/adaptive evaluation; native benchmark reproduction; supported
 deployment conformance; advisory/secret scanning, signed releases and vulnerability support.

@@ -22,6 +22,7 @@ class Role(StrEnum):
     REVIEWER = "reviewer"
     AUDITOR = "auditor"
     AGENT = "agent"
+    EXECUTOR = "executor"
 
 
 class ActionKind(StrEnum):
@@ -84,8 +85,12 @@ class ActionRequest(PublicModel):
 
     @model_validator(mode="after")
     def validate_http_target(self) -> ActionRequest:
-        if self.kind is ActionKind.HTTP and not self.target:
-            raise ValueError("HTTP actions require a target URL")
+        if self.kind is ActionKind.HTTP:
+            from traceguard.policy.network import destination
+
+            if not self.target:
+                raise ValueError("HTTP actions require a target URL")
+            destination(self.target)
         return self
 
 
@@ -168,6 +173,12 @@ class Review(PublicModel):
     resolution: ReviewResolution | None = None
     resolved_by: str | None = None
     reason: str | None = None
+    action_digest: str
+    agent_subject: str
+    service_key_id: str
+    task_id: str
+    policy_epoch: int = Field(ge=1)
+    grant_nonce: str | None = None
 
 
 class AuditEvent(PublicModel):
@@ -206,3 +217,44 @@ class HttpAction(PublicModel):
     url: HttpUrl
     headers: dict[str, str] = Field(default_factory=dict)
     json_body: dict[str, Any] | None = None
+
+
+class ExecutionGrant(PublicModel):
+    nonce: str = Field(default_factory=lambda: str(uuid4()))
+    tenant_id: str
+    task_id: str
+    agent_subject: str
+    service_key_id: str
+    audience: str
+    action_digest: str
+    authority_digest: str
+    adapter_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    policy_id: str
+    policy_epoch: int = Field(ge=1)
+    issued_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    expires_at: datetime
+    repeatable: bool = False
+    amount: str = "0"
+    budget_limit: str | None = None
+    key_id: str
+    signature: str
+
+
+class TaskRegistration(PublicModel):
+    task_id: str = Field(min_length=1, max_length=256)
+    agent_subject: str = Field(min_length=1, max_length=256)
+    service_key_id: str = Field(min_length=1, max_length=256)
+    authority: dict[str, Any]
+    tool_schemas: dict[str, dict[str, Any]]
+    adapter_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class GrantRequest(PublicModel):
+    action: ActionRequest
+    review_id: str | None = None
+    executor_audience: str = Field(min_length=1, max_length=256)
+
+
+class GrantValidation(PublicModel):
+    action: ActionRequest
+    grant: ExecutionGrant

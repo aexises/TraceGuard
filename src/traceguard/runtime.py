@@ -72,6 +72,7 @@ class TraceGuardRuntime:
         self.executed_calls: dict[str, list[ToolCall]] = {}
         self.escalated_tasks: set[str] = set()
         if self.policy is not None:
+            self.policy.config = self.policy.config.model_copy(deep=True)
             self.policy.task_authority = self.task_authority
         if config.deterministic_policy and policy is None:
             raise ValueError("deterministic policy is enabled but unavailable")

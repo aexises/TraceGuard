@@ -131,8 +131,11 @@ Example cache configuration in application-owned code:
 
 ```python
 cache = SignedPolicyCache(
-    policy_public_key, tenant_id="tenant-a", audience="agent",
-    service_key_id="key-1", key_id="development-ed25519-v1",
+    policy_public_key,
+    tenant_id="tenant-a",
+    audience="agent",
+    service_key_id="key-1",
+    key_id="development-ed25519-v1",
 )
 ```
 
@@ -140,3 +143,13 @@ Obtain/pin `policy_public_key` through trusted deployment configuration, not the
 unauthenticated response carrying the bundle. Recreate the cache with approved keys and a
 trusted minimum epoch during rotation. A valid signature does not authenticate arbitrary
 retrieved evidence or attest to tool correctness.
+
+
+## Typed execution grants
+
+The task/grant/validation endpoints and separate EXECUTOR role are documented in
+[the execution contract](execution_grants.md). Evaluation receipts alone are not
+single-use execution authorization. Task registration requires application administration;
+review approvals are bound to the action, principal, task and policy epoch. The development
+issuer remains in memory; the optional executor ledger is durable local SQLite and must
+be isolated from the agent and preserved across executor restarts.

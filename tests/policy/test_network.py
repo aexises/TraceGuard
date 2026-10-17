@@ -106,3 +106,22 @@ def test_headers_cannot_change_transport_authority(headers):
 def test_userinfo_and_controls_rejected_before_transport():
     with pytest.raises(UnsafeDestination):
         destination("https://allowed.test\n.evil.test/")
+
+
+def test_pinned_socket_uses_validated_ip_and_original_tls_hostname():
+    from traceguard.policy.network import PinnedHTTPSConnection
+
+    connection = PinnedHTTPSConnection("approved.example.test", 443, "8.8.8.8", timeout=2)
+    calls = []
+
+    class TLS:
+        def wrap_socket(self, sock, *, server_hostname):
+            calls.append(server_hostname)
+            return sock
+
+    connection._context = TLS()
+    sock = object()
+    with patch("traceguard.policy.network.socket.create_connection", return_value=sock) as opened:
+        connection.connect()
+    opened.assert_called_once_with(("8.8.8.8", 443), 2)
+    assert calls == ["approved.example.test"]

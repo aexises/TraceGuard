@@ -211,7 +211,14 @@ class ControlPlane:
         result.audit_id = audit.audit_id
         if result.decision is Decision.ESCALATE:
             review = Review(
-                tenant_id=action.tenant_id, action_id=action.action_id, audit_id=audit.audit_id
+                tenant_id=action.tenant_id,
+                action_id=action.action_id,
+                audit_id=audit.audit_id,
+                action_digest=digest,
+                agent_subject=actor.subject,
+                service_key_id=actor.service_key_id,
+                task_id=action.task_id,
+                policy_epoch=epoch,
             )
             self._reviews[review.review_id] = review
             result.review_id = review.review_id
@@ -238,6 +245,10 @@ class ControlPlane:
             raise KeyError("review not found")
         if review.status != "pending":
             raise ValueError("review has already been resolved")
+        if review.policy_epoch != self._epochs.get(tenant_id):
+            raise ValueError("review policy is stale")
+        if review.agent_subject == actor.subject:
+            raise AuthorizationError("action proposer cannot approve their own action")
         if review.expires_at < datetime.now(UTC):
             review.status = "expired"
             raise ValueError("review has expired")

@@ -13,9 +13,12 @@ from fastapi.responses import JSONResponse
 from traceguard.control.models import (
     ActionRequest,
     Actor,
+    GrantRequest,
+    GrantValidation,
     PolicyDraft,
     ResolveReviewRequest,
     Role,
+    TaskRegistration,
 )
 from traceguard.control.service import AuthorizationError, ControlPlane, IdempotencyConflict
 
@@ -37,6 +40,9 @@ def token_resolver(tokens: dict[str, Actor]) -> IdentityResolver:
 
 
 def create_app(control: ControlPlane, identity: IdentityResolver) -> FastAPI:
+    from traceguard.control.execution import ExecutionAuthority
+
+    execution = ExecutionAuthority(control)
     app = FastAPI(title="TraceGuard Control Plane", version="1.0.0")
 
     def actor(authorization: Annotated[str | None, Header()] = None) -> Actor:
@@ -52,6 +58,31 @@ def create_app(control: ControlPlane, identity: IdentityResolver) -> FastAPI:
     @app.exception_handler(IdempotencyConflict)
     async def conflict(_: Request, exc: IdempotencyConflict) -> JSONResponse:
         return JSONResponse(status_code=409, content={"detail": str(exc)})
+
+    @app.exception_handler(KeyError)
+    async def missing(_: Request, exc: KeyError) -> JSONResponse:
+        return JSONResponse(status_code=404, content={"detail": "resource not found"})
+
+    @app.exception_handler(ValueError)
+    async def invalid(_: Request, exc: ValueError) -> JSONResponse:
+        return JSONResponse(status_code=400, content={"detail": str(exc)})
+
+    @app.post("/v1/tasks/register")
+    def register_task(
+        tenant_id: str, registration: TaskRegistration, current: Actor = Depends(actor)
+    ) -> dict[str, str]:
+        return {"authority_digest": execution.register(tenant_id, current, registration)}
+
+    @app.post("/v1/execution/grants")
+    def issue_grant(body: GrantRequest, current: Actor = Depends(actor)) -> dict[str, Any]:
+        return execution.issue(
+            current, body.action, body.executor_audience, body.review_id
+        ).model_dump(mode="json")
+
+    @app.post("/v1/execution/validate")
+    def validate_grant(body: GrantValidation, current: Actor = Depends(actor)) -> dict[str, bool]:
+        execution.validate(current, body.action, body.grant)
+        return {"valid": True}
 
     @app.get("/healthz")
     def health() -> dict[str, str]:
