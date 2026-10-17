@@ -197,3 +197,87 @@ def test_unscoped_identity_and_operation_outside_scope_are_denied():
     agent.allowed_operations = frozenset({"read"})
     with pytest.raises(AuthorizationError, match="operation"):
         plane.evaluate(agent, action)
+
+
+@pytest.mark.parametrize(
+    "changed",
+    [
+        {"operation": "DELETE"},
+        {"target": "https://outside.test/"},
+        {"arguments": {"x": 1}},
+        {"task_id": "other-task"},
+    ],
+)
+def test_idempotency_rejects_changed_actions(changed):
+    from traceguard.control.service import IdempotencyConflict
+
+    plane, agent = active_plane()
+    original = ActionRequest(
+        tenant_id="tenant-a",
+        idempotency_key="bound-key",
+        kind="http",
+        operation="GET",
+        target="https://api.example.test/a",
+    )
+    plane.evaluate(agent, original)
+    with pytest.raises(IdempotencyConflict, match="different action"):
+        plane.evaluate(agent, original.model_copy(update=changed))
+
+
+def test_idempotency_is_principal_bound_and_returns_copies():
+    plane, agent = active_plane()
+    request = ActionRequest(
+        tenant_id="tenant-a",
+        idempotency_key="bound-key",
+        kind="http",
+        operation="GET",
+        target="https://api.example.test/a",
+    )
+    first = plane.evaluate(agent, request)
+    first.decision = Decision.BLOCK
+    replay = plane.evaluate(agent, request)
+    other = plane.evaluate(actor("other", Role.AGENT, service_key=True), request)
+    assert replay.decision is Decision.ALLOW
+    assert replay.audit_id == first.audit_id != other.audit_id
+    assert replay.action_digest == other.action_digest
+
+
+def test_policy_change_invalidates_old_decision_receipt():
+    from traceguard.control.service import IdempotencyConflict
+
+    plane, agent = active_plane()
+    request = ActionRequest(
+        tenant_id="tenant-a",
+        idempotency_key="bound-key",
+        kind="http",
+        operation="GET",
+        target="https://api.example.test/a",
+    )
+    plane.evaluate(agent, request)
+    author = actor("author", Role.ADMIN)
+    new = plane.create_draft(
+        "tenant-a",
+        author,
+        PolicyDraft(
+            name="deny",
+            rules=[
+                PolicyRule(
+                    name="deny",
+                    priority=1,
+                    match=RuleMatch(),
+                    decision=Decision.BLOCK,
+                    reason="revoked",
+                )
+            ],
+        ),
+    )
+    plane.submit_policy("tenant-a", author, new.policy_id)
+    plane.approve_policy("tenant-a", actor("approver", Role.APPROVER), new.policy_id)
+    with pytest.raises(IdempotencyConflict, match="stale"):
+        plane.evaluate(agent, request)
+    assert (
+        plane.evaluate(
+            agent, request.model_copy(update={"idempotency_key": "new-bound-key"})
+        ).decision
+        is Decision.BLOCK
+    )

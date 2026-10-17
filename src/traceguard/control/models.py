@@ -72,6 +72,7 @@ class Evidence(PublicModel):
 class ActionRequest(PublicModel):
     tenant_id: str = Field(min_length=1, max_length=128)
     idempotency_key: str = Field(min_length=8, max_length=256)
+    task_id: str = Field(default="default", min_length=1, max_length=256)
     action_id: str = Field(default_factory=lambda: str(uuid4()))
     kind: ActionKind
     operation: str = Field(min_length=1, max_length=256)
@@ -142,6 +143,7 @@ class DecisionResponse(PublicModel):
     review_id: str | None = None
     rewritten_arguments: dict[str, Any] | None = None
     from_cache: bool = False
+    action_digest: str | None = None
 
 
 class Review(PublicModel):

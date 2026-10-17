@@ -84,3 +84,11 @@ Agent credentials may additionally constrain `allowed_operations`. Resource acce
 bounded by the tenant's active policy; membership alone never supplies an ALLOW.
 The development token belongs only to `TRACEGUARD_DEV_TENANT` (default `tenant-a`).
 Do not obtain principal scopes from an action body, model output or evidence labels.
+
+
+Idempotency receipts are bound to tenant, principal, credential, task and canonical action.
+Changed payload reuse returns HTTP 409. Policy activation/rollback or receipt expiry also
+requires a new key; a cached ALLOW never authorizes work under a changed policy. Transport
+request timestamps/action IDs are not semantic payload. Responses include `action_digest`.
+These are decision receipts, not proof of execution or an exactly-once side-effect guarantee.
+The development store serializes policy/decision updates within one process only.

@@ -11,7 +11,10 @@ import hashlib
 import hmac
 import json
 import re
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from functools import wraps
+from threading import RLock
 from typing import Any
 
 from traceguard.control.models import (
@@ -57,6 +60,34 @@ class AuthorizationError(PermissionError):
     pass
 
 
+class IdempotencyConflict(ValueError):
+    """An idempotency key cannot authorize changed work or stale policy."""
+
+
+def action_digest(action: ActionRequest) -> str:
+    payload = action.model_dump(
+        mode="json", exclude={"action_id", "requested_at", "idempotency_key"}
+    )
+    return hashlib.sha256(_canonical(payload)).hexdigest()
+
+
+@dataclass(frozen=True)
+class DecisionReceipt:
+    digest: str
+    epoch: int
+    expires_at: datetime
+    result: DecisionResponse
+
+
+def synchronized(method):
+    @wraps(method)
+    def locked(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+
+    return locked
+
+
 class ControlPlane:
     """A multi-tenant, fail-closed safety regulator service."""
 
@@ -68,8 +99,11 @@ class ControlPlane:
         self._policies: dict[str, list[PolicyVersion]] = {}
         self._audits: dict[str, list[AuditEvent]] = {}
         self._reviews: dict[str, Review] = {}
-        self._idempotent: dict[tuple[str, str], DecisionResponse] = {}
+        self._idempotent: dict[tuple[str, str, str, str], DecisionReceipt] = {}
+        self._epochs: dict[str, int] = {}
+        self._lock = RLock()
 
+    @synchronized
     def create_draft(self, tenant_id: str, actor: Actor, draft: PolicyDraft) -> PolicyVersion:
         self._require(actor, Role.ADMIN, tenant_id)
         versions = self._policies.setdefault(tenant_id, [])
@@ -85,6 +119,7 @@ class ControlPlane:
         )
         return policy
 
+    @synchronized
     def submit_policy(self, tenant_id: str, actor: Actor, policy_id: str) -> PolicyVersion:
         self._require(actor, Role.ADMIN, tenant_id)
         policy = self._policy(tenant_id, policy_id)
@@ -96,6 +131,7 @@ class ControlPlane:
         self._append_audit(tenant_id, "policy.submitted", actor.subject, {"policy_id": policy_id})
         return policy
 
+    @synchronized
     def approve_policy(self, tenant_id: str, actor: Actor, policy_id: str) -> PolicyVersion:
         self._require(actor, Role.APPROVER, tenant_id)
         policy = self._policy(tenant_id, policy_id)
@@ -109,9 +145,11 @@ class ControlPlane:
         policy.status = PolicyStatus.ACTIVE
         policy.approved_by = actor.subject
         policy.activated_at = datetime.now(UTC)
+        self._epochs[tenant_id] = self._epochs.get(tenant_id, 0) + 1
         self._append_audit(tenant_id, "policy.activated", actor.subject, {"policy_id": policy_id})
         return policy
 
+    @synchronized
     def rollback(self, tenant_id: str, actor: Actor, policy_id: str) -> PolicyVersion:
         self._require(actor, Role.APPROVER, tenant_id)
         target = self._policy(tenant_id, policy_id)
@@ -123,9 +161,11 @@ class ControlPlane:
         target.status = PolicyStatus.ACTIVE
         target.approved_by = actor.subject
         target.activated_at = datetime.now(UTC)
+        self._epochs[tenant_id] = self._epochs.get(tenant_id, 0) + 1
         self._append_audit(tenant_id, "policy.rolled_back", actor.subject, {"policy_id": policy_id})
         return target
 
+    @synchronized
     def evaluate(self, actor: Actor, action: ActionRequest) -> DecisionResponse:
         self._require(actor, Role.AGENT, action.tenant_id)
         if (
@@ -135,9 +175,15 @@ class ControlPlane:
             raise AuthorizationError("operation is outside the service credential scope")
         if actor.service_key_id is None:
             raise AuthorizationError("agent actions require a scoped service credential")
-        key = (action.tenant_id, action.idempotency_key)
+        key = (action.tenant_id, actor.subject, actor.service_key_id, action.idempotency_key)
+        digest = action_digest(action)
+        epoch = self._epochs.get(action.tenant_id, 0)
         if cached := self._idempotent.get(key):
-            return cached
+            if cached.digest != digest:
+                raise IdempotencyConflict("idempotency key is bound to a different action")
+            if cached.epoch != epoch or cached.expires_at <= datetime.now(UTC):
+                raise IdempotencyConflict("decision receipt is stale; use a new idempotency key")
+            return cached.result.model_copy(deep=True)
         policy = self.active_policy(action.tenant_id)
         if policy is None:
             result = self._decision(action, Decision.BLOCK, "no active policy", None)
@@ -175,9 +221,12 @@ class ControlPlane:
             self._append_audit(
                 action.tenant_id, "review.created", actor.subject, review.model_dump()
             )
-        self._idempotent[key] = result
+        self._idempotent[key] = DecisionReceipt(
+            digest, epoch, datetime.now(UTC) + timedelta(minutes=5), result.model_copy(deep=True)
+        )
         return result
 
+    @synchronized
     def resolve_review(
         self,
         tenant_id: str,
@@ -212,6 +261,7 @@ class ControlPlane:
             None,
         )
 
+    @synchronized
     def signed_bundle(
         self, tenant_id: str, actor: Actor, ttl: timedelta = timedelta(minutes=15)
     ) -> SignedPolicyBundle:
@@ -235,6 +285,7 @@ class ControlPlane:
         ).hexdigest()
         return bundle
 
+    @synchronized
     def export_audit(self, tenant_id: str, actor: Actor) -> dict[str, Any]:
         self._require(actor, Role.AUDITOR, tenant_id)
         events = self._audits.get(tenant_id, [])
@@ -279,6 +330,7 @@ class ControlPlane:
         return DecisionResponse(
             decision=decision,
             reason=reason,
+            action_digest=action_digest(action),
             policy_id=policy.policy_id if policy else None,
             policy_version=policy.version if policy else None,
             audit_id="pending",

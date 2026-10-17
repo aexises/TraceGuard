@@ -17,7 +17,7 @@ from traceguard.control.models import (
     ResolveReviewRequest,
     Role,
 )
-from traceguard.control.service import AuthorizationError, ControlPlane, redact
+from traceguard.control.service import AuthorizationError, ControlPlane, IdempotencyConflict, redact
 
 IdentityResolver = Callable[[str | None], Actor]
 
@@ -48,6 +48,10 @@ def create_app(control: ControlPlane, identity: IdentityResolver) -> FastAPI:
     @app.exception_handler(AuthorizationError)
     async def forbidden(_: Request, exc: AuthorizationError) -> JSONResponse:
         return JSONResponse(status_code=403, content={"detail": str(exc)})
+
+    @app.exception_handler(IdempotencyConflict)
+    async def conflict(_: Request, exc: IdempotencyConflict) -> JSONResponse:
+        return JSONResponse(status_code=409, content={"detail": str(exc)})
 
     @app.get("/healthz")
     def health() -> dict[str, str]:
