@@ -183,3 +183,13 @@ integration and still needs its own stronger resource and concurrent-mutation ga
 Runtime configuration and authority are snapshotted; reusable evaluators are copied so
 one runtime cannot overwrite another runtime's task authority. One runtime serializes
 its check/execute/history operations; no cross-process exactly-once claim is made.
+
+
+## Strict grant profile
+
+`SecuredTools` selects strict enforcement. All consequential arguments need explicit
+field authority; only versioned generated-text fields may vary without exact values.
+Existing ablation APIs keep `enforcement_mode="research"` for compatibility. Native and
+dataset adapters opt into the same strict kernel through trusted scope configuration.
+The kernel, source schemas and descriptor data are snapshotted and contribute to a digest.
+See `docs/security_framework.md` for limits and the development conformance comparison.

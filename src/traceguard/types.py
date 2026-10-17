@@ -102,6 +102,8 @@ class TaskAuthority(StrictModel):
     repeatable_tools: list[str] = Field(default_factory=list)
     argument_values: dict[str, dict[str, Any]] = Field(default_factory=dict)
     resource_values: dict[str, dict[str, list[Any]]] = Field(default_factory=dict)
+    enforcement_mode: Literal["research", "strict"] = "research"
+    generated_fields: dict[str, list[str]] = Field(default_factory=dict)
     delegated_fields: dict[str, dict[str, list[str]]] = Field(default_factory=dict)
     max_amount: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     prohibited_content: list[str] = Field(default_factory=list)

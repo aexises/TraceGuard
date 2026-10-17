@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, model_validator
@@ -65,7 +65,7 @@ class Actor(PublicModel):
 class Evidence(PublicModel):
     content: str = Field(default="", max_length=32_768)
     source: str = Field(min_length=1, max_length=128)
-    untrusted: bool = False
+    untrusted: Literal[True] = True
     contains_instructions: bool = False
 
 
@@ -119,7 +119,13 @@ class PolicyRule(PublicModel):
 class PolicyDraft(PublicModel):
     name: str = Field(min_length=1, max_length=256)
     rules: list[PolicyRule] = Field(min_length=1, max_length=1_000)
-    default_decision: Decision = Decision.BLOCK
+    default_decision: Literal[Decision.BLOCK, Decision.ESCALATE] = Decision.BLOCK
+
+    @model_validator(mode="after")
+    def unique_rule_ids(self) -> PolicyDraft:
+        if len({rule.rule_id for rule in self.rules}) != len(self.rules):
+            raise ValueError("policy rule identifiers must be unique")
+        return self
 
 
 class PolicyVersion(PublicModel):

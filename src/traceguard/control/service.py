@@ -29,16 +29,12 @@ from traceguard.control.models import (
     Review,
     ReviewResolution,
     Role,
-    RuleMatch,
     SignedPolicyBundle,
 )
-from traceguard.policy.network import target_within_scope
+from traceguard.policy.matching import matches, select_rule
 
 _SECRET_PATTERN = re.compile(
     r"(?i)\b(?:api[_-]?key|password|secret|token)\s*[:=]\s*['\"]?[^\s,'\"]+"
-)
-_INSTRUCTION_PATTERN = re.compile(
-    r"(?i)\b(?:ignore (?:previous|all) instructions|system prompt|reveal secrets|exfiltrate)\b"
 )
 
 
@@ -111,14 +107,14 @@ class ControlPlane:
         policy = PolicyVersion(
             tenant_id=tenant_id,
             version=len(versions) + 1,
-            draft=draft,
+            draft=draft.model_copy(deep=True),
             created_by=actor.subject,
         )
         versions.append(policy)
         self._append_audit(
             tenant_id, "policy.drafted", actor.subject, {"policy_id": policy.policy_id}
         )
-        return policy
+        return policy.model_copy(deep=True)
 
     @synchronized
     def submit_policy(self, tenant_id: str, actor: Actor, policy_id: str) -> PolicyVersion:
@@ -130,7 +126,7 @@ class ControlPlane:
             raise ValueError("only drafts may be submitted")
         policy.status = PolicyStatus.PENDING_APPROVAL
         self._append_audit(tenant_id, "policy.submitted", actor.subject, {"policy_id": policy_id})
-        return policy
+        return policy.model_copy(deep=True)
 
     @synchronized
     def approve_policy(self, tenant_id: str, actor: Actor, policy_id: str) -> PolicyVersion:
@@ -148,7 +144,7 @@ class ControlPlane:
         policy.activated_at = datetime.now(UTC)
         self._epochs[tenant_id] = self._epochs.get(tenant_id, 0) + 1
         self._append_audit(tenant_id, "policy.activated", actor.subject, {"policy_id": policy_id})
-        return policy
+        return policy.model_copy(deep=True)
 
     @synchronized
     def rollback(self, tenant_id: str, actor: Actor, policy_id: str) -> PolicyVersion:
@@ -164,7 +160,7 @@ class ControlPlane:
         target.activated_at = datetime.now(UTC)
         self._epochs[tenant_id] = self._epochs.get(tenant_id, 0) + 1
         self._append_audit(tenant_id, "policy.rolled_back", actor.subject, {"policy_id": policy_id})
-        return target
+        return target.model_copy(deep=True)
 
     @synchronized
     def evaluate(self, actor: Actor, action: ActionRequest) -> DecisionResponse:
@@ -250,17 +246,19 @@ class ControlPlane:
         review.resolved_by = actor.subject
         review.reason = reason
         self._append_audit(tenant_id, "review.resolved", actor.subject, review.model_dump())
-        return review
+        return review.model_copy(deep=True)
 
     def active_policy(self, tenant_id: str) -> PolicyVersion | None:
-        return next(
-            (
-                item
-                for item in reversed(self._policies.get(tenant_id, []))
-                if item.status is PolicyStatus.ACTIVE
-            ),
-            None,
-        )
+        with self._lock:
+            policy = next(
+                (
+                    item
+                    for item in reversed(self._policies.get(tenant_id, []))
+                    if item.status is PolicyStatus.ACTIVE
+                ),
+                None,
+            )
+            return policy.model_copy(deep=True) if policy is not None else None
 
     @synchronized
     def signed_bundle(
@@ -338,35 +336,10 @@ class ControlPlane:
             rewritten_arguments=rewrite,
         )
 
-    @staticmethod
-    def _matches(match: RuleMatch, action: ActionRequest) -> bool:
-        if match.kind is not None and match.kind != action.kind:
-            return False
-        if match.operation is not None and match.operation != action.operation:
-            return False
-        if match.target_prefix is not None:
-            if action.kind.value == "http":
-                if not target_within_scope(match.target_prefix, action.target or ""):
-                    return False
-            elif not (action.target or "").startswith(match.target_prefix):
-                return False
-        if any(action.arguments.get(key) != value for key, value in match.argument_equals.items()):
-            return False
-        has_instruction = any(
-            item.untrusted
-            and (item.contains_instructions or bool(_INSTRUCTION_PATTERN.search(item.content)))
-            for item in action.evidence
-        )
-        return (
-            match.contains_untrusted_instructions is None
-            or match.contains_untrusted_instructions == has_instruction
-        )
+    _matches = staticmethod(matches)
 
     def _matching_rule(self, policy: PolicyVersion, action: ActionRequest):
-        for rule in sorted(policy.draft.rules, key=lambda item: item.priority, reverse=True):
-            if self._matches(rule.match, action):
-                return rule
-        return None
+        return select_rule(policy, action)
 
     def _policy(self, tenant_id: str, policy_id: str) -> PolicyVersion:
         for policy in self._policies.get(tenant_id, []):

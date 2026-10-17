@@ -281,3 +281,58 @@ def test_policy_change_invalidates_old_decision_receipt():
         ).decision
         is Decision.BLOCK
     )
+
+
+@pytest.mark.parametrize("default", [Decision.ALLOW, Decision.REWRITE])
+def test_policy_defaults_cannot_authorize_unmatched_actions(default):
+    with pytest.raises(ValueError):
+        PolicyDraft(
+            name="invalid",
+            default_decision=default,
+            rules=[
+                PolicyRule(
+                    name="one", priority=1, match=RuleMatch(), decision=Decision.BLOCK, reason="x"
+                )
+            ],
+        )
+
+
+def test_lower_priority_deny_is_terminal_and_policy_snapshots_cannot_be_mutated():
+    plane, agent = active_plane()
+    snapshot = plane.active_policy("tenant-a")
+    snapshot.draft.rules[0].match.target_prefix = "https://outside.test/"
+    request = ActionRequest(
+        tenant_id="tenant-a",
+        idempotency_key="snapshot-test",
+        kind="http",
+        operation="GET",
+        target="https://outside.test/",
+    )
+    assert plane.evaluate(agent, request).decision is Decision.BLOCK
+    author = actor("author", Role.ADMIN)
+    draft = PolicyDraft(
+        name="deny-wins",
+        rules=[
+            PolicyRule(
+                name="broad allow",
+                priority=100,
+                match=RuleMatch(),
+                decision=Decision.ALLOW,
+                reason="allow",
+            ),
+            PolicyRule(
+                name="deny",
+                priority=0,
+                match=RuleMatch(operation="DELETE"),
+                decision=Decision.BLOCK,
+                reason="deny",
+            ),
+        ],
+    )
+    policy = plane.create_draft("tenant-a", author, draft)
+    draft.rules[1].decision = Decision.ALLOW
+    plane.submit_policy("tenant-a", author, policy.policy_id)
+    plane.approve_policy("tenant-a", actor("approver", Role.APPROVER), policy.policy_id)
+    request.operation = "DELETE"
+    request.idempotency_key = "deny-wins-test"
+    assert plane.evaluate(agent, request).decision is Decision.BLOCK

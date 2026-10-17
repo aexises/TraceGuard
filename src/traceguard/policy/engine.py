@@ -11,7 +11,7 @@ from pathlib import Path, PurePosixPath
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from traceguard.policy.authorization import check_authority, sensitive_path
+from traceguard.policy.authorization import check_authority, sensitive_path, tool_effect
 from traceguard.types import (
     Decision,
     ExecutionTarget,
@@ -67,7 +67,11 @@ class DeterministicPolicy:
         if resource_result is not None:
             return resource_result
 
-        relevance_result = self._evaluate_goal_relevance(user_task, call)
+        relevance_result = (
+            self._evaluate_goal_relevance(user_task, call)
+            if self.task_authority.enforcement_mode == "research"
+            else None
+        )
         if relevance_result is not None:
             return relevance_result
 
@@ -93,6 +97,8 @@ class DeterministicPolicy:
             return self._allow(
                 "POLICY_TOOL_LOW_RISK", GoalRelevance.UNCERTAIN, GoalNecessity.UNCERTAIN
             )
+        if self.task_authority.enforcement_mode == "strict" and tool_effect(call) != "command":
+            return self._allow("POLICY_STRICT_AUTHORITY")
         return self._escalate("POLICY_UNKNOWN_TOOL", "Tool effect is not registered.")
 
     def _version_rules(self, *rules: str) -> list[str]:
@@ -234,6 +240,10 @@ class DeterministicPolicy:
                 match.rstrip(".,:;!?") for match in re.findall(r"[\w.-]+(?:/[\w.-]+)+", user_task)
             }
             trusted_paths = self.task_authority.argument_values.get("read_file", {})
+            if self.task_authority.enforcement_mode == "strict":
+                trusted_paths = trusted_paths or self.task_authority.resource_values.get(
+                    "read_file", {}
+                )
             delegated = "path" in self.task_authority.delegated_fields.get("read_file", {})
             if not mentioned_paths and not trusted_paths and not delegated:
                 return self._escalate(

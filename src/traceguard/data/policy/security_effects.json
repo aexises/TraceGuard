@@ -28,5 +28,11 @@
     "get_webpage": ["url"],
     "post_webpage": ["url"]
   },
-  "sensitive_reads": ["get_credit_card_details", "get_user_info", "get_user_information"]
+  "sensitive_reads": ["get_credit_card_details", "get_user_info", "get_user_information"],
+  "generatable_fields": {
+    "write_report": ["content"],
+    "send_email": ["subject", "body"],
+    "memory": ["content"],
+    "create_calendar_event": ["title", "description"]
+  }
 }

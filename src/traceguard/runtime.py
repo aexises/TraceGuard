@@ -10,6 +10,7 @@ from threading import RLock
 
 from traceguard.policy.authorization import duplicate_mutation, output
 from traceguard.policy.engine import DeterministicPolicy
+from traceguard.policy.kernel import CompiledAuthority
 from traceguard.sandbox.runner import ContainerRunner, SandboxUnavailable
 from traceguard.supervisor.base import Supervisor, merge_outputs
 from traceguard.supervisor.contracts import (
@@ -63,6 +64,11 @@ class TraceGuardRuntime:
         self.supervisor = copy(supervisor) if supervisor is not None else None
         self.sandbox = sandbox
         self.task_authority = (task_authority or TaskAuthority()).model_copy(deep=True)
+        self.compiled_authority = (
+            CompiledAuthority.compile(self.task_authority, tools.schemas())
+            if self.task_authority.enforcement_mode == "strict"
+            else None
+        )
         self.executed_calls: dict[str, list[ToolCall]] = {}
         self.escalated_tasks: set[str] = set()
         if self.policy is not None:
@@ -261,6 +267,13 @@ class TraceGuardRuntime:
         self, user_task: str, call: ToolCall, observations: list[Observation]
     ) -> list[SupervisorOutput]:
         outputs: list[SupervisorOutput] = []
+        if self.compiled_authority is not None:
+            checked = self.compiled_authority.evaluate(
+                user_task, call, observations, self.executed_calls.get(call.task_id, [])
+            )
+            outputs.append(checked)
+            if checked.decision in {Decision.BLOCK, Decision.ESCALATE}:
+                return outputs
         if self.config.deterministic_policy or self.config.llm_supervisor:
             repeated = duplicate_mutation(
                 call, self.executed_calls.get(call.task_id, []), self.task_authority

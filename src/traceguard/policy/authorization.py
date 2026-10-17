@@ -158,10 +158,25 @@ def check_authority(
     effect = tool_effect(call)
     if effect == "unknown":
         return output(Decision.ESCALATE, "unknown-tool-effect", "Tool effect is not registered.")
+    if call.tool_name == "harmful_action_simulator":
+        return output(
+            Decision.BLOCK,
+            "prohibited-effect",
+            "Trusted policy prohibits the simulated harmful effect.",
+        )
     if authority.allowed_tools is not None and call.tool_name not in authority.allowed_tools:
         return output(
             Decision.BLOCK, "unauthorized-tool", "Tool is outside the trusted task scope."
         )
+    if authority.enforcement_mode == "strict":
+        from traceguard.policy.kernel import validate_authority
+
+        try:
+            validate_authority(authority)
+        except ValueError:
+            return output(
+                Decision.ESCALATE, "invalid-strict-grant", "Strict grant is incomplete or invalid."
+            )
     for field, expected in authority.argument_values.get(call.tool_name, {}).items():
         actual = (
             call.requested_resources
@@ -208,7 +223,9 @@ def check_authority(
                 "argument-mismatch",
                 f"Argument {field} differs from the authorized source.",
             )
-    for field in scoped_fields(call):
+    for field in sorted(
+        set(scoped_fields(call)) | set(authority.resource_values.get(call.tool_name, {}))
+    ):
         if field in authority.argument_values.get(
             call.tool_name, {}
         ) or field in authority.delegated_fields.get(call.tool_name, {}):
@@ -220,7 +237,11 @@ def check_authority(
                 "resource-authority-missing",
                 f"{field} needs explicit trusted object or network scope.",
             )
-        actual = call.arguments[field]
+        actual = (
+            call.requested_resources
+            if field == "requested_resources"
+            else call.arguments.get(field)
+        )
         values = actual if isinstance(actual, list) else [actual]
         if not values or any(
             not any(same_value(value, permitted) for permitted in allowed) for value in values
@@ -296,6 +317,21 @@ def check_authority(
             return output(
                 Decision.BLOCK, "sensitive-data", "Protected filesystem object requested."
             )
+    if authority.enforcement_mode == "strict":
+        from traceguard.policy.kernel import ungranted_fields
+
+        missing = ungranted_fields(call, authority, effect)
+        if missing:
+            return output(
+                Decision.ESCALATE,
+                "strict-ungranted-fields",
+                "Consequential fields lack explicit authority: " + ", ".join(sorted(missing)),
+            )
+        if unresolved_amount:
+            return output(
+                Decision.ESCALATE, "unresolved-amount", "Payment amount needs explicit scope."
+            )
+        return None
     if effect == "read":
         return None
     verbs = effect_registry()["mutations"].get(

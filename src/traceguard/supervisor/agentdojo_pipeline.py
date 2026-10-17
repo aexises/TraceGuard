@@ -77,6 +77,7 @@ def build_supervised_agentdojo_pipeline(
     """Build an AgentDojo pipeline with TraceGuard between LLM and tools."""
 
     redaction_config = mandatory_redaction_config(redaction_config)
+    task_authority = (task_authority or TaskAuthority()).model_copy(deep=True)
 
     from agentdojo.agent_pipeline.agent_pipeline import AgentPipeline
     from agentdojo.agent_pipeline.base_pipeline_element import BasePipelineElement

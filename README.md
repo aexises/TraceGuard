@@ -59,6 +59,41 @@ checks references; add `--output-manifest artifacts/release/control-plane.yaml` 
 new manifest. Follow the separate registry and Kubernetes-schema gates in
 [the container release guide](docs/control_plane.md#container-build-and-release-checks).
 
+## Strict application integration
+
+Use `traceguard.security.SecuredTools` with application-owned `TaskAuthority`.
+It compiles an explicit tool allowlist, exact/resource/source constraints and reviewed
+`generated_fields` into an immutable grant. Every consequential field needs authority;
+English verbs and model explanations cannot create permissions. For example:
+
+```python
+from pathlib import Path
+from traceguard.security import SecuredTools
+from traceguard.tools.registry import default_registry
+from traceguard.types import TaskAuthority
+
+boundary = SecuredTools(
+    default_registry(Path("."), Path("artifacts")),
+    TaskAuthority(
+        allowed_tools=["write_report"],
+        argument_values={"write_report": {"path": "artifacts/report.txt"}},
+        generated_fields={"write_report": ["content"]},
+    ),
+)
+# Supply model ToolCall proposals only to boundary.execute_call(...).
+```
+
+The existing `TraceGuardRuntime`/ablation interfaces preserve explicitly labelled
+research heuristics for historical experiments; they are not the strict product entry
+point. In-process integration trusts application code and cannot contain arbitrary code
+with the host's own credentials. The isolated executor profile remains a release gate.
+
+Run the deterministic development comparison with
+`python -m benchmarks.policy_conformance`. These authored cases compare the current
+research grammar with explicit grants; they do not reproduce CaMeL/Progent or prove
+live-model effectiveness. See `docs/security_framework.md` for the security contract,
+reference comparison and remaining release gates.
+
 ## How it works
 
 For each proposed tool call, TraceGuard combines structured tool definitions,

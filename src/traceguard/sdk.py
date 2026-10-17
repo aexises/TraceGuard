@@ -18,7 +18,7 @@ from traceguard.control.models import (
     HttpAction,
     SignedPolicyBundle,
 )
-from traceguard.control.service import ControlPlane
+from traceguard.policy.matching import select_rule
 from traceguard.policy.network import PublicHTTPTransport
 
 
@@ -42,7 +42,7 @@ class SignedPolicyCache:
             raise PolicyUnavailable("policy bundle signature is invalid")
         if bundle.expires_at <= datetime.now(UTC):
             raise PolicyUnavailable("policy bundle has expired")
-        self._bundle = bundle
+        self._bundle = bundle.model_copy(deep=True)
 
     def evaluate(self, action: ActionRequest) -> DecisionResponse:
         bundle = self._bundle
@@ -50,18 +50,16 @@ class SignedPolicyCache:
             raise PolicyUnavailable("no policy bundle for tenant")
         if bundle.expires_at <= datetime.now(UTC):
             raise PolicyUnavailable("policy bundle has expired")
-        for rule in sorted(bundle.policy.draft.rules, key=lambda item: item.priority, reverse=True):
-            if ControlPlane._matches(rule.match, action):
-                if rule.decision is Decision.ALLOW and rule.cache_eligible:
-                    return DecisionResponse(
-                        decision=Decision.ALLOW,
-                        reason=f"cached policy: {rule.reason}",
-                        policy_id=bundle.policy.policy_id,
-                        policy_version=bundle.policy.version,
-                        audit_id="cache-pending-reconciliation",
-                        from_cache=True,
-                    )
-                break
+        rule = select_rule(bundle.policy, action)
+        if rule is not None and rule.decision is Decision.ALLOW and rule.cache_eligible:
+            return DecisionResponse(
+                decision=Decision.ALLOW,
+                reason=f"cached policy: {rule.reason}",
+                policy_id=bundle.policy.policy_id,
+                policy_version=bundle.policy.version,
+                audit_id="cache-pending-reconciliation",
+                from_cache=True,
+            )
         raise PolicyUnavailable("cached policy cannot authorize this action")
 
 

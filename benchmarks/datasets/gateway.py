@@ -38,7 +38,7 @@ class SupervisionGateway:
         if mode not in {"none", "deterministic", "llm", "deterministic_llm"}:
             raise ValueError(f"unknown supervisor mode: {mode}")
         self.mode = mode
-        self.task_authority = task_authority or TaskAuthority()
+        self.task_authority = (task_authority or TaskAuthority()).model_copy(deep=True)
         self.history: list[ToolCall] = []
         self.escalated = False
         if supervisor is None and mode == "deterministic":
