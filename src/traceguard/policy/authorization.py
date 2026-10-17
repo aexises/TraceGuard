@@ -14,6 +14,7 @@ from functools import lru_cache
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from traceguard.policy.effects import email_effects, scoped_fields, security_descriptors
 from traceguard.types import (
     Decision,
     GoalNecessity,
@@ -97,6 +98,16 @@ def infer_provenance(
     return result
 
 
+def same_value(actual: Any, expected: Any) -> bool:
+    """Exact JSON values; Python bool/int equality is not an authorization rule."""
+    try:
+        return json.dumps(actual, sort_keys=True, allow_nan=False) == json.dumps(
+            expected, sort_keys=True, allow_nan=False
+        )
+    except (TypeError, ValueError):
+        return False
+
+
 def _values(value: Any) -> set[str]:
     return {str(item).casefold() for item in (value if isinstance(value, list) else [value])}
 
@@ -147,17 +158,32 @@ def check_authority(
     effect = tool_effect(call)
     if effect == "unknown":
         return output(Decision.ESCALATE, "unknown-tool-effect", "Tool effect is not registered.")
+    if call.tool_name == "harmful_action_simulator":
+        return output(
+            Decision.BLOCK,
+            "prohibited-effect",
+            "Trusted policy prohibits the simulated harmful effect.",
+        )
     if authority.allowed_tools is not None and call.tool_name not in authority.allowed_tools:
         return output(
             Decision.BLOCK, "unauthorized-tool", "Tool is outside the trusted task scope."
         )
+    if authority.enforcement_mode == "strict":
+        from traceguard.policy.kernel import validate_authority
+
+        try:
+            validate_authority(authority)
+        except ValueError:
+            return output(
+                Decision.ESCALATE, "invalid-strict-grant", "Strict grant is incomplete or invalid."
+            )
     for field, expected in authority.argument_values.get(call.tool_name, {}).items():
         actual = (
             call.requested_resources
             if field == "requested_resources"
             else call.arguments.get(field)
         )
-        if actual != expected:
+        if not same_value(actual, expected):
             return output(
                 Decision.BLOCK,
                 "argument-mismatch",
@@ -191,12 +217,44 @@ def check_authority(
                 "ambiguous-delegated-value",
                 f"Cannot uniquely resolve authorized {field}.",
             )
-        if actual != candidates[0]:
+        if not same_value(actual, candidates[0]):
             return output(
                 Decision.BLOCK,
                 "argument-mismatch",
                 f"Argument {field} differs from the authorized source.",
             )
+    for field in sorted(
+        set(scoped_fields(call)) | set(authority.resource_values.get(call.tool_name, {}))
+    ):
+        if field in authority.argument_values.get(
+            call.tool_name, {}
+        ) or field in authority.delegated_fields.get(call.tool_name, {}):
+            continue
+        allowed = authority.resource_values.get(call.tool_name, {}).get(field)
+        if allowed is None:
+            return output(
+                Decision.ESCALATE,
+                "resource-authority-missing",
+                f"{field} needs explicit trusted object or network scope.",
+            )
+        actual = (
+            call.requested_resources
+            if field == "requested_resources"
+            else call.arguments.get(field)
+        )
+        values = actual if isinstance(actual, list) else [actual]
+        if not values or any(
+            not any(same_value(value, permitted) for permitted in allowed) for value in values
+        ):
+            return output(Decision.BLOCK, "resource-out-of-scope", "Resource exceeds task scope.")
+    if call.tool_name in security_descriptors()["sensitive_reads"] and (
+        authority.allowed_tools is None or call.tool_name not in authority.allowed_tools
+    ):
+        return output(
+            Decision.ESCALATE,
+            "sensitive-read-authority",
+            "Sensitive reads require an explicit grant.",
+        )
     unresolved_amount = False
     if call.tool_name in {"send_money", "schedule_transaction"}:
         amount = call.arguments.get("amount")
@@ -240,11 +298,40 @@ def check_authority(
             "prohibited-disclosure",
             "Proposed arguments disclose protected content.",
         )
+    if call.tool_name == "send_email":
+        try:
+            email = email_effects(call)
+        except ValueError:
+            return output(Decision.BLOCK, "invalid-email-effect", "Invalid email destinations.")
+        for field in email.referenced_objects:
+            if field not in authority.argument_values.get(
+                call.tool_name, {}
+            ) and field not in authority.delegated_fields.get(call.tool_name, {}):
+                return output(
+                    Decision.ESCALATE,
+                    "unscoped-email-attachment",
+                    "Email attachments require explicit trusted object authorization.",
+                )
     for field in ("path", "file_path"):
         if field in call.arguments and sensitive_path(str(call.arguments[field])):
             return output(
                 Decision.BLOCK, "sensitive-data", "Protected filesystem object requested."
             )
+    if authority.enforcement_mode == "strict":
+        from traceguard.policy.kernel import ungranted_fields
+
+        missing = ungranted_fields(call, authority, effect)
+        if missing:
+            return output(
+                Decision.ESCALATE,
+                "strict-ungranted-fields",
+                "Consequential fields lack explicit authority: " + ", ".join(sorted(missing)),
+            )
+        if unresolved_amount:
+            return output(
+                Decision.ESCALATE, "unresolved-amount", "Payment amount needs explicit scope."
+            )
+        return None
     if effect == "read":
         return None
     verbs = effect_registry()["mutations"].get(
@@ -299,9 +386,12 @@ def check_authority(
         else None
     )
     explicit_emails = set(EMAIL_RE.findall(goal.casefold()))
-    for field in ("recipients", "to", "recipient", "participants", "email"):
+    destination_fields = set(("recipients", "to", "recipient", "participants", "email"))
+    if call.tool_name == "send_email":
+        destination_fields.update(security_descriptors()["email"]["recipient_fields"])
+    for field in sorted(destination_fields):
         actual = call.arguments.get(field)
-        if actual is None:
+        if actual is None or actual == []:
             continue
         if explicit_emails and not _values(actual).issubset(explicit_emails):
             return output(

@@ -13,6 +13,7 @@ from pydantic import Field
 from traceguard.types import StrictModel
 
 DEFAULT_SECRET_PATTERNS = [
+    r"(?i)\b(?:password|secret|token|api[_-]?key)\s*[:=]\s*['\"]?[^'\"\s,&;]+",
     r"(?i)\bapi[_-]?key\s*[:=]\s*['\"]?([A-Za-z0-9_\-]{16,})",
     r"(?i)\bbearer\s+[A-Za-z0-9_\-.=]{12,}",
     r"(?i)\bpassword\s*[:=]\s*['\"]?[^'\"\s]+",
@@ -22,7 +23,7 @@ DEFAULT_SECRET_PATTERNS = [
 ]
 SENSITIVE_KEY_PATTERN = re.compile(
     r"(?i)(api[_-]?key|password|passphrase|secret|credential|"
-    r"(access|session|refresh|auth)[_-]?token|cookie|private[_-]?key)"
+    r"(access|session|refresh|auth)[_-]?token|authorization|cookie|private[_-]?key)"
 )
 
 

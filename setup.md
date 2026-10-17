@@ -426,7 +426,7 @@ response_bytes = client.request_http(
 ```
 
 For outage resilience, retrieve a signed bundle while the control plane is available and install
-it in `SignedPolicyCache`. The cache verifies the HMAC signature and expiration before use. It
+it in `SignedPolicyCache`. The cache verifies the Ed25519 signature and expiration before use. It
 may authorize only a matching rule that is both `ALLOW` and `cache_eligible`; all other offline
 requests fail closed. Cached decisions are retained by the client for reconciliation after the
 control plane returns.
@@ -472,7 +472,7 @@ Do not process production traffic until all of the following are implemented and
   signed checkpoints, verify chains during export, and test backup/restore.
 - **Evidence:** Store encrypted, time-limited full evidence in an approved object store; retain
   only metadata and redacted excerpts by default. Enforce tenant-scoped access and deletion.
-- **Keys:** Replace the development HMAC key with KMS/HSM-backed signing and envelope encryption,
+- **Keys:** Replace the development software signing key with KMS/HSM-backed signing and envelope encryption,
   key IDs, rotation, revocation, and audit logging.
 - **Identity:** Validate OIDC issuer, audience, signature, expiry, and group-to-role mappings.
   Issue scoped, rotatable service credentials to agents; never use the development token resolver.

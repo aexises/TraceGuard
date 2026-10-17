@@ -19,9 +19,11 @@ from traceguard.policy.authorization import (
     duplicate_mutation,
     effect_registry,
     infer_provenance,
+    output,
     tool_effect,
 )
 from traceguard.policy.engine import load_default_policy
+from traceguard.supervisor.base import enforce_allow_invariants
 from traceguard.supervisor.contracts import (
     PostRunSupervisorRequest,
     PostRunSupervisorResponse,
@@ -790,7 +792,7 @@ class QwenSupervisor:
         step_already_rewritten: bool = False,
     ) -> None:
         self.previous_calls = list(previous_calls)
-        self.task_authority = task_authority
+        self.task_authority = task_authority.model_copy(deep=True)
         if trusted_policy is not None:
             self.trusted_policy = trusted_policy
         self.step_already_rewritten = step_already_rewritten
@@ -1058,6 +1060,17 @@ class QwenSupervisor:
         call: ToolCall,
         observations: list[Observation],
     ) -> SupervisorOutput:
+        if self.task_authority.enforcement_mode == "strict":
+            from traceguard.policy.kernel import CompiledAuthority
+
+            try:
+                return CompiledAuthority.compile(
+                    self.task_authority, self.available_tools
+                ).evaluate(user_task, call, observations, self.previous_calls)
+            except ValueError:
+                return output(
+                    Decision.ESCALATE, "invalid-strict-grant", "Strict grant compilation failed."
+                )
         denied = check_authority(
             user_task, call, observations, self.task_authority, self.previous_calls
         )
@@ -1086,7 +1099,7 @@ class QwenSupervisor:
                     "arguments": response.rewritten_call.arguments,
                 }
             )
-        return SupervisorOutput(
+        result = SupervisorOutput(
             decision=response.decision,
             risk=max(deterministic.risk, _to_runtime_risk(response.risk_level), key=_risk_rank),
             confidence=response.confidence,
@@ -1104,6 +1117,8 @@ class QwenSupervisor:
             if response.metadata
             else {},
         )
+
+        return enforce_allow_invariants(result)
 
     @staticmethod
     def _output(

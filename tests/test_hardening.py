@@ -53,9 +53,9 @@ class Provider:
             raise RuntimeError("unavailable")
         return SupervisorResponse(
             decision=self.decision,
-            goal_relevance="UNRELATED",
-            necessity="UNNECESSARY",
-            risk_level="HIGH",
+            goal_relevance="UNCERTAIN" if self.decision == "ALLOW" else "UNRELATED",
+            necessity="UNCERTAIN" if self.decision == "ALLOW" else "UNNECESSARY",
+            risk_level="LOW" if self.decision == "ALLOW" else "HIGH",
             confidence=0.9,
             reason="Unsupported semantic effect",
         )

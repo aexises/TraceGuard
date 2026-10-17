@@ -1,7 +1,7 @@
-# TraceGuard `types-v3` Contract
+# TraceGuard `types-v4` Contract
 
 `src/traceguard/types.py` is the authoritative shared schema. Experiment manifests record
-`types-v3`; incompatible changes require a new contract version. Version 3 adds trusted
+`types-v4`; incompatible changes require a new contract version. Version 3 adds trusted
 `TaskAuthority`, explicit `UNCERTAIN` goal labels, and bounded block replanning. Version 2
 added observation-injection and memory-poisoning threat models. Existing frozen cases
 remain valid; historical enforcement results belong to their original code and policy.
@@ -147,3 +147,49 @@ provides them.
 An observation imported from an untrusted dataset or native tool is always represented
 as `UNTRUSTED_TOOL` with `may_contain_instructions=true`. Memory and service state are
 created per case and discarded after scoring.
+
+
+## Reviewed email security effects
+
+`security-effects-v1` extracts all `send_email` destination fields, including CC/BCC.
+Attachments require an exact trusted constraint or authenticated-source delegation;
+a recipient grant never grants access to arbitrary file/calendar attachments. Empty
+optional sink lists introduce no effects. The extractor is shared with deterministic
+native supervision and is independent of whether the model calls the tool a read/write.
+
+
+Version 4 adds exact `resource_values` scopes for object selectors and outbound URLs.
+A deletion verb or a read classification grants no object or network authority.
+`security-effects-v2` requires explicit constraints, delegated fields, or an allowlisted
+resource value for supported object IDs, memory paths and URL destinations. Sensitive
+account reads require an explicit tool grant. URL grants include the whole URL, including
+query parameters. Calendar event identity must come from trusted application resolution;
+a retrieved event title alone does not authenticate a target. Historical runs remain v3.
+
+
+All execution integrations reject an ALLOW that reports high/critical risk, a policy
+violation, irrelevance or unnecessary action. Such contradictory decisions escalate;
+structured JSON does not make an inconsistent authorization executable. SIMULATED is
+handled before tool dispatch and never invokes a real handler or records a real effect.
+Contained execution is not a way to override these final checks.
+
+
+The supported direct filesystem profile uses POSIX descriptor-relative, no-follow reads
+and atomic report replacement. Symlinks, hardlinks and special files cannot alias an
+approved path to another object; reads are bounded during collection. Unsupported
+platform primitives fail closed. This does not authenticate file contents or establish
+that an attacker-writable document is true. Container input staging is a separate
+integration and still needs its own stronger resource and concurrent-mutation gates.
+Runtime configuration and authority are snapshotted; reusable evaluators are copied so
+one runtime cannot overwrite another runtime's task authority. One runtime serializes
+its check/execute/history operations; no cross-process exactly-once claim is made.
+
+
+## Strict grant profile
+
+`SecuredTools` selects strict enforcement. All consequential arguments need explicit
+field authority; only versioned generated-text fields may vary without exact values.
+Existing ablation APIs keep `enforcement_mode="research"` for compatibility. Native and
+dataset adapters opt into the same strict kernel through trusted scope configuration.
+The kernel, source schemas and descriptor data are snapshotted and contribute to a digest.
+See `docs/security_framework.md` for limits and the development conformance comparison.

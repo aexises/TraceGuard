@@ -861,7 +861,14 @@ def test_qwen_runtime_supervisor_allows_requested_add_participants():
         arguments={"event_id": "24", "participants": ["john@example.com"]},
         consumed_observation_ids=[observation.observation_id],
     )
-    result = QwenSupervisor(provider=FakeProvider(response_json())).evaluate(
+    guard = QwenSupervisor(provider=FakeProvider(response_json()))
+    guard.set_context(
+        previous_calls=[],
+        task_authority=TaskAuthority(
+            resource_values={"add_calendar_event_participants": {"event_id": ["24"]}}
+        ),
+    )
+    result = guard.evaluate(
         "Please add john@example.com to the participants of the Introductory meeting event.",
         call,
         [observation],
