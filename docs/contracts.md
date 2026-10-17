@@ -165,3 +165,10 @@ resource value for supported object IDs, memory paths and URL destinations. Sens
 account reads require an explicit tool grant. URL grants include the whole URL, including
 query parameters. Calendar event identity must come from trusted application resolution;
 a retrieved event title alone does not authenticate a target. Historical runs remain v3.
+
+
+All execution integrations reject an ALLOW that reports high/critical risk, a policy
+violation, irrelevance or unnecessary action. Such contradictory decisions escalate;
+structured JSON does not make an inconsistent authorization executable. SIMULATED is
+handled before tool dispatch and never invokes a real handler or records a real effect.
+Contained execution is not a way to override these final checks.

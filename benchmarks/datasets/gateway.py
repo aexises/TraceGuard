@@ -5,7 +5,7 @@ from typing import Any
 
 from traceguard.policy.authorization import duplicate_mutation, output
 from traceguard.supervisor.agentdojo_pipeline import AgentDojoDeterministicSupervisor
-from traceguard.supervisor.base import Supervisor
+from traceguard.supervisor.base import Supervisor, enforce_allow_invariants
 from traceguard.supervisor.contracts import (
     SupervisorSchemaError,
     _validate_arguments_against_json_schema,
@@ -146,6 +146,7 @@ class SupervisionGateway:
                 decision = checked.model_copy(
                     update={"decision": Decision.ESCALATE, "rewritten_call": None}
                 )
+        decision = enforce_allow_invariants(decision)
         if decision.decision is Decision.ESCALATE:
             self.escalated = True
         return call, decision

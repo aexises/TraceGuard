@@ -146,6 +146,23 @@ class TraceGuardRuntime:
             validated=True,
             validation_reason="approved safeguard merge",
         )
+        if target is ExecutionTarget.SIMULATED or (
+            effective_call.tool_name == "restricted_command" and target is ExecutionTarget.DEFAULT
+        ):
+            # A simulation must never reach a real handler or execution ledger.
+            plan.target = ExecutionTarget.SIMULATED
+            observation = Observation(
+                content='{"status":"simulated","host_execution":false}',
+                source_type="simulation",
+                source_id=call.call_id,
+                trust=TrustLabel.UNTRUSTED_TOOL,
+                may_contain_instructions=False,
+                provenance_chain=[*call.consumed_observation_ids, call.call_id],
+            )
+            return RuntimeResult(
+                self._trace(call, effective_call, outputs, plan, observation, started, "SIMULATED"),
+                observation,
+            )
         if target is ExecutionTarget.CONTAINER:
             if self.sandbox is None:
                 trace = self._trace(call, effective_call, outputs, plan, None, started, "ESCALATE")

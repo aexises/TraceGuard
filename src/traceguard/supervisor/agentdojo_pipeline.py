@@ -9,6 +9,7 @@ from typing import Any
 from uuid import NAMESPACE_URL, uuid5
 
 from traceguard.policy.authorization import check_authority, duplicate_mutation, output
+from traceguard.supervisor.base import enforce_allow_invariants
 from traceguard.supervisor.contracts import (
     SupervisorEvaluationLog,
     SupervisorSchemaError,
@@ -249,6 +250,7 @@ def build_supervised_agentdojo_pipeline(
                         decision = checked.model_copy(
                             update={"decision": Decision.ESCALATE, "rewritten_call": None}
                         )
+                decision = enforce_allow_invariants(decision)
                 decision_payload = decision.model_dump(mode="json")
                 decision_record = {
                     **decision_payload,

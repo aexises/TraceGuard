@@ -22,6 +22,7 @@ from traceguard.policy.authorization import (
     tool_effect,
 )
 from traceguard.policy.engine import load_default_policy
+from traceguard.supervisor.base import enforce_allow_invariants
 from traceguard.supervisor.contracts import (
     PostRunSupervisorRequest,
     PostRunSupervisorResponse,
@@ -1086,7 +1087,7 @@ class QwenSupervisor:
                     "arguments": response.rewritten_call.arguments,
                 }
             )
-        return SupervisorOutput(
+        result = SupervisorOutput(
             decision=response.decision,
             risk=max(deterministic.risk, _to_runtime_risk(response.risk_level), key=_risk_rank),
             confidence=response.confidence,
@@ -1104,6 +1105,8 @@ class QwenSupervisor:
             if response.metadata
             else {},
         )
+
+        return enforce_allow_invariants(result)
 
     @staticmethod
     def _output(
