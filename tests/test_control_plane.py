@@ -20,7 +20,12 @@ KEY = b"a" * 32
 
 
 def actor(subject: str, *roles: Role, service_key: bool = False) -> Actor:
-    return Actor(subject=subject, roles=set(roles), service_key_id="key-1" if service_key else None)
+    return Actor(
+        subject=subject,
+        roles=set(roles),
+        service_key_id="key-1" if service_key else None,
+        tenant_ids=frozenset({"tenant-a"}),
+    )
 
 
 def active_plane() -> tuple[ControlPlane, Actor]:
@@ -149,3 +154,46 @@ def test_expired_or_tampered_bundle_fails_closed() -> None:
     bundle = plane.signed_bundle("tenant-a", agent, timedelta(seconds=-1))
     with pytest.raises(PolicyUnavailable):
         SignedPolicyCache(KEY).install(bundle)
+
+
+@pytest.mark.parametrize(
+    "operation", ["draft", "submit", "approve", "rollback", "evaluate", "bundle", "audit", "review"]
+)
+def test_all_service_operations_reject_cross_tenant_principals(operation):
+    plane, _ = active_plane()
+    outsider = Actor(
+        subject="outsider", roles=set(Role), service_key_id="outside", tenant_ids={"tenant-b"}
+    )
+    policy = plane.active_policy("tenant-a")
+    assert policy is not None
+    operations = {
+        "draft": lambda: plane.create_draft("tenant-a", outsider, policy.draft),
+        "submit": lambda: plane.submit_policy("tenant-a", outsider, policy.policy_id),
+        "approve": lambda: plane.approve_policy("tenant-a", outsider, policy.policy_id),
+        "rollback": lambda: plane.rollback("tenant-a", outsider, policy.policy_id),
+        "evaluate": lambda: plane.evaluate(
+            outsider,
+            ActionRequest(
+                tenant_id="tenant-a", idempotency_key="scope-key", kind="tool", operation="read"
+            ),
+        ),
+        "bundle": lambda: plane.signed_bundle("tenant-a", outsider),
+        "audit": lambda: plane.export_audit("tenant-a", outsider),
+        "review": lambda: plane.resolve_review(
+            "tenant-a", outsider, "unknown", ReviewResolution.ALLOW, "x"
+        ),
+    }
+    with pytest.raises(AuthorizationError, match="tenant"):
+        operations[operation]()
+
+
+def test_unscoped_identity_and_operation_outside_scope_are_denied():
+    plane, agent = active_plane()
+    action = ActionRequest(
+        tenant_id="tenant-a", idempotency_key="scope-key", kind="tool", operation="delete"
+    )
+    with pytest.raises(AuthorizationError):
+        plane.evaluate(Actor(subject="unscoped", roles={Role.AGENT}, service_key_id="x"), action)
+    agent.allowed_operations = frozenset({"read"})
+    with pytest.raises(AuthorizationError, match="operation"):
+        plane.evaluate(agent, action)

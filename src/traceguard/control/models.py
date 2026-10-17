@@ -58,6 +58,8 @@ class Actor(PublicModel):
     subject: str = Field(min_length=1, max_length=256)
     roles: set[Role] = Field(min_length=1)
     service_key_id: str | None = None
+    tenant_ids: frozenset[str] = Field(default_factory=frozenset)
+    allowed_operations: frozenset[str] | None = None
 
 
 class Evidence(PublicModel):

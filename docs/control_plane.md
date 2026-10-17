@@ -74,3 +74,13 @@ kubectl -n traceguard apply -f artifacts/release/control-plane.yaml
 The existing non-root user, read-only filesystem, dropped capabilities, disabled
 service-account-token mount, and runtime-default seccomp profile remain required.
 This command deploys a disposable development service, not a production control plane.
+
+
+## Principal scope
+
+Identity adapters must supply explicit `Actor.tenant_ids`; an empty set grants no tenant access.
+Every public service operation checks tenant membership and role before accessing state.
+Agent credentials may additionally constrain `allowed_operations`. Resource access remains
+bounded by the tenant's active policy; membership alone never supplies an ALLOW.
+The development token belongs only to `TRACEGUARD_DEV_TENANT` (default `tenant-a`).
+Do not obtain principal scopes from an action body, model output or evidence labels.
