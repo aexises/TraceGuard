@@ -24,8 +24,10 @@ def actor(name, role, key=None):
     return Actor(subject=name, roles={role}, service_key_id=key, tenant_ids={"tenant"})
 
 
-def configured(tmp_path, *, review=False, tool="send_email", budget=None, dispatch=None):
-    control = ControlPlane(b"test-only-signing-seed-" + b"x" * 32)
+def configured(
+    tmp_path, *, review=False, tool="send_email", budget=None, dispatch=None, control=None
+):
+    control = control or ControlPlane(b"test-only-signing-seed-" + b"x" * 32)
     author, approver = actor("author", Role.ADMIN), actor("approver", Role.APPROVER)
     policy = control.create_draft(
         "tenant",

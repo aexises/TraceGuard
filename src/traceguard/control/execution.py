@@ -49,13 +49,20 @@ class ExecutionAuthority:
 
     def __init__(self, control: ControlPlane, signing_seed: bytes | None = None) -> None:
         self.control = control
-        # A separate random execution identity is never distributed to executors.
-        import secrets
-
-        self._signer = Signer(signing_seed or secrets.token_bytes(32), "traceguard-execution-v1")
+        self._signer = (
+            Signer(signing_seed, "traceguard-execution-v1")
+            if signing_seed
+            else control._execution_signer
+        )
         self.key_id = "execution-ed25519-v1"
-        self._tasks: dict[tuple[str, str], RegisteredTask] = {}
-        self._issued: dict[str, str] = {}
+
+    @property
+    def _tasks(self) -> dict[tuple[str, str], RegisteredTask]:
+        return self.control._execution_tasks
+
+    @property
+    def _issued(self) -> dict[str, str]:
+        return self.control._execution_issued
 
     @property
     def public_key(self) -> bytes:
@@ -71,7 +78,7 @@ class ExecutionAuthority:
             )
         compiled = CompiledAuthority.compile(scope, registration.tool_schemas)
         key = (tenant_id, registration.task_id)
-        with self.control._lock:
+        with self.control.transaction():
             if key in self._tasks:
                 raise ValueError("task registration is immutable; create a newly approved task")
             self._tasks[key] = RegisteredTask(
@@ -112,7 +119,7 @@ class ExecutionAuthority:
         self, actor: Actor, action: ActionRequest, audience: str, review_id: str | None = None
     ) -> ExecutionGrant:
         action, actor = action.model_copy(deep=True), actor.model_copy(deep=True)
-        with self.control._lock:
+        with self.control.transaction():
             task = self._task(actor, action)
             decision = self.control.evaluate(actor, action)
             review = None
@@ -175,7 +182,7 @@ class ExecutionAuthority:
             return grant
 
     def validate(self, executor: Actor, action: ActionRequest, grant: ExecutionGrant) -> None:
-        with self.control._lock:
+        with self.control.transaction():
             self.control._require(executor, Role.EXECUTOR, action.tenant_id)
             if Role.AGENT in executor.roles or not executor.service_key_id:
                 raise AuthorizationError("executor requires a distinct service identity")
