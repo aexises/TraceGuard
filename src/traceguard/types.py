@@ -9,7 +9,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-CONTRACT_VERSION = "types-v3"
+CONTRACT_VERSION = "types-v4"
 
 
 class StrictModel(BaseModel):
@@ -101,6 +101,7 @@ class TaskAuthority(StrictModel):
     allowed_tools: list[str] | None = None
     repeatable_tools: list[str] = Field(default_factory=list)
     argument_values: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    resource_values: dict[str, dict[str, list[Any]]] = Field(default_factory=dict)
     delegated_fields: dict[str, dict[str, list[str]]] = Field(default_factory=dict)
     max_amount: float | None = Field(default=None, ge=0, allow_inf_nan=False)
     prohibited_content: list[str] = Field(default_factory=list)

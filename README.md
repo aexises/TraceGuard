@@ -18,7 +18,7 @@ unmediated agent safe by itself.
 The policy audit is in [`docs/policy_review_20261006.md`](docs/policy_review_20261006.md).
 The implementation and local pilot follow-up is in
 [`docs/hardening_and_pilot_20261006.md`](docs/hardening_and_pilot_20261006.md).
-Active contracts are `types-v3`, custom policy `2.0.0`, `effects-v1`, and supervisor
+Active contracts are `types-v4`, custom policy `2.0.0`, `effects-v1`, and supervisor
 `supervisor_v2.txt`. Historical custom results use older enforcement and the heuristic
 surrogate; they do not demonstrate incremental live-supervisor value.
 

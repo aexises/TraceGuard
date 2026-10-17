@@ -1,7 +1,32 @@
 {
-  "version": "security-effects-v1",
+  "version": "security-effects-v2",
   "email": {
     "recipient_fields": ["recipients", "to", "recipient", "cc", "bcc"],
     "object_fields": ["attachments"]
-  }
+  },
+  "object_fields": {
+    "delete_email": ["email_id"],
+    "delete_file": ["file_id"],
+    "share_file": ["file_id"],
+    "append_to_file": ["file_id"],
+    "get_email": ["email_id"],
+    "email_read": ["email_id"],
+    "get_file": ["file_id"],
+    "get_file_content": ["file_id"],
+    "get_file_by_id": ["file_id"],
+    "get_calendar_event": ["event_id"],
+    "cancel_calendar_event": ["event_id"],
+    "reschedule_calendar_event": ["event_id"],
+    "add_calendar_event_participants": ["event_id"],
+    "update_scheduled_transaction": ["transaction_id", "id"],
+    "delete_scheduled_transaction": ["transaction_id", "id"],
+    "merge_pull_request": ["pull_request_id", "pull_request_number"],
+    "memory": ["path"],
+    "text_editor": ["path"]
+  },
+  "network_fields": {
+    "get_webpage": ["url"],
+    "post_webpage": ["url"]
+  },
+  "sensitive_reads": ["get_credit_card_details", "get_user_info", "get_user_information"]
 }

@@ -1,7 +1,7 @@
-# TraceGuard `types-v3` Contract
+# TraceGuard `types-v4` Contract
 
 `src/traceguard/types.py` is the authoritative shared schema. Experiment manifests record
-`types-v3`; incompatible changes require a new contract version. Version 3 adds trusted
+`types-v4`; incompatible changes require a new contract version. Version 3 adds trusted
 `TaskAuthority`, explicit `UNCERTAIN` goal labels, and bounded block replanning. Version 2
 added observation-injection and memory-poisoning threat models. Existing frozen cases
 remain valid; historical enforcement results belong to their original code and policy.
@@ -156,3 +156,12 @@ Attachments require an exact trusted constraint or authenticated-source delegati
 a recipient grant never grants access to arbitrary file/calendar attachments. Empty
 optional sink lists introduce no effects. The extractor is shared with deterministic
 native supervision and is independent of whether the model calls the tool a read/write.
+
+
+Version 4 adds exact `resource_values` scopes for object selectors and outbound URLs.
+A deletion verb or a read classification grants no object or network authority.
+`security-effects-v2` requires explicit constraints, delegated fields, or an allowlisted
+resource value for supported object IDs, memory paths and URL destinations. Sensitive
+account reads require an explicit tool grant. URL grants include the whole URL, including
+query parameters. Calendar event identity must come from trusted application resolution;
+a retrieved event title alone does not authenticate a target. Historical runs remain v3.

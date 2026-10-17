@@ -35,3 +35,13 @@ def email_effects(call: ToolCall) -> EmailEffects:
         recipients.extend((field, value.casefold()) for value in values)
     objects = tuple(field for field in descriptor["object_fields"] if call.arguments.get(field))
     return EmailEffects(tuple(recipients), objects)
+
+
+def scoped_fields(call: ToolCall) -> tuple[str, ...]:
+    """Consequential object selectors and outbound requests need separate authority."""
+    descriptors = security_descriptors()
+    fields = set(descriptors["object_fields"].get(call.tool_name, []))
+    fields.update(descriptors["network_fields"].get(call.tool_name, []))
+    # New ID selectors cannot silently evade a descriptor for an existing operation.
+    fields.update(field for field in call.arguments if field.endswith(("_id", "_ids")))
+    return tuple(sorted(field for field in fields if field in call.arguments))

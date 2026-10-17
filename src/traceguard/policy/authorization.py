@@ -14,7 +14,7 @@ from functools import lru_cache
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from traceguard.policy.effects import email_effects, security_descriptors
+from traceguard.policy.effects import email_effects, scoped_fields, security_descriptors
 from traceguard.types import (
     Decision,
     GoalNecessity,
@@ -98,6 +98,16 @@ def infer_provenance(
     return result
 
 
+def same_value(actual: Any, expected: Any) -> bool:
+    """Exact JSON values; Python bool/int equality is not an authorization rule."""
+    try:
+        return json.dumps(actual, sort_keys=True, allow_nan=False) == json.dumps(
+            expected, sort_keys=True, allow_nan=False
+        )
+    except (TypeError, ValueError):
+        return False
+
+
 def _values(value: Any) -> set[str]:
     return {str(item).casefold() for item in (value if isinstance(value, list) else [value])}
 
@@ -158,7 +168,7 @@ def check_authority(
             if field == "requested_resources"
             else call.arguments.get(field)
         )
-        if actual != expected:
+        if not same_value(actual, expected):
             return output(
                 Decision.BLOCK,
                 "argument-mismatch",
@@ -192,12 +202,38 @@ def check_authority(
                 "ambiguous-delegated-value",
                 f"Cannot uniquely resolve authorized {field}.",
             )
-        if actual != candidates[0]:
+        if not same_value(actual, candidates[0]):
             return output(
                 Decision.BLOCK,
                 "argument-mismatch",
                 f"Argument {field} differs from the authorized source.",
             )
+    for field in scoped_fields(call):
+        if field in authority.argument_values.get(
+            call.tool_name, {}
+        ) or field in authority.delegated_fields.get(call.tool_name, {}):
+            continue
+        allowed = authority.resource_values.get(call.tool_name, {}).get(field)
+        if allowed is None:
+            return output(
+                Decision.ESCALATE,
+                "resource-authority-missing",
+                f"{field} needs explicit trusted object or network scope.",
+            )
+        actual = call.arguments[field]
+        values = actual if isinstance(actual, list) else [actual]
+        if not values or any(
+            not any(same_value(value, permitted) for permitted in allowed) for value in values
+        ):
+            return output(Decision.BLOCK, "resource-out-of-scope", "Resource exceeds task scope.")
+    if call.tool_name in security_descriptors()["sensitive_reads"] and (
+        authority.allowed_tools is None or call.tool_name not in authority.allowed_tools
+    ):
+        return output(
+            Decision.ESCALATE,
+            "sensitive-read-authority",
+            "Sensitive reads require an explicit grant.",
+        )
     unresolved_amount = False
     if call.tool_name in {"send_money", "schedule_transaction"}:
         amount = call.arguments.get("amount")
