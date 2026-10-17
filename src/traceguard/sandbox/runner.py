@@ -18,9 +18,11 @@ from uuid import uuid4
 from traceguard.policy.authorization import sensitive_path
 from traceguard.sandbox.config import (
     ENABLED_PROFILES,
+    InputLimits,
     SandboxProfile,
     load_sandbox_configuration,
 )
+from traceguard.tools.filesystem import CopyBudget, copy_confined
 from traceguard.types import ExecutionPlan, ExecutionTarget, SandboxEvidence
 
 _Executor = Callable[..., subprocess.CompletedProcess[str]]
@@ -137,7 +139,7 @@ class ContainerRunner:
                 if plan.declared_input_paths:
                     raise SandboxUnavailable("isolated_compute does not accept host inputs")
             else:
-                self._stage_inputs(plan.declared_input_paths, input_root)
+                self._stage_inputs(plan.declared_input_paths, input_root, profile.input_limits)
             if profile.output_mode == "allowlisted":
                 output_root.mkdir(mode=0o777)
                 # mkdir's mode is filtered by the host umask. The container's non-root
@@ -276,52 +278,32 @@ class ContainerRunner:
             )
         return [*docker_command, self.image, *command]
 
-    def _stage_inputs(self, declared_paths: list[str], input_root: Path) -> None:
+    def _stage_inputs(
+        self, declared_paths: list[str], input_root: Path, limits: InputLimits | None = None
+    ) -> None:
+        budget = CopyBudget(**(limits or InputLimits()).model_dump())
         for raw_path in declared_paths:
             relative = Path(raw_path)
             if relative.is_absolute() or ".." in relative.parts or relative == Path("."):
                 raise SandboxUnavailable(f"declared input is outside the workspace: {raw_path}")
             if sensitive_path(raw_path):
                 raise SandboxUnavailable("protected declared input is not allowed")
-            untrusted_source = self.workspace_root / relative
-            component = self.workspace_root
-            for part in relative.parts:
-                component /= part
-                if component.is_symlink():
-                    raise SandboxUnavailable(
-                        f"symbolic-link input is not allowed: {component.name}"
-                    )
-            self._reject_symlinks(untrusted_source)
-            if untrusted_source.is_dir() and any(
-                sensitive_path(child.relative_to(self.workspace_root).as_posix())
-                for child in untrusted_source.rglob("*")
-            ):
-                raise SandboxUnavailable("declared directory contains protected objects")
-            source = untrusted_source.resolve()
-            if source != self.workspace_root and self.workspace_root not in source.parents:
-                raise SandboxUnavailable(f"declared input escapes the workspace: {raw_path}")
-            if not source.exists():
-                raise SandboxUnavailable(f"declared input does not exist: {raw_path}")
             destination = input_root / relative
             if destination.exists():
                 raise SandboxUnavailable(f"overlapping declared input: {raw_path}")
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            if source.is_dir():
-                shutil.copytree(source, destination)
-            elif source.is_file():
-                shutil.copy2(source, destination)
-            else:
-                raise SandboxUnavailable(f"declared input is not a regular file: {raw_path}")
+            try:
+                copy_confined(
+                    self.workspace_root,
+                    raw_path,
+                    destination,
+                    budget=budget,
+                    prohibited=sensitive_path,
+                )
+            except (ValueError, OSError) as exc:
+                raise SandboxUnavailable(
+                    "unsafe symbolic-link/aliased input or staging limit exceeded"
+                ) from exc
         _make_tree_readonly(input_root)
-
-    @staticmethod
-    def _reject_symlinks(path: Path) -> None:
-        if path.is_symlink():
-            raise SandboxUnavailable(f"symbolic-link input is not allowed: {path.name}")
-        if path.is_dir():
-            for child in path.rglob("*"):
-                if child.is_symlink():
-                    raise SandboxUnavailable(f"symbolic-link input is not allowed: {child.name}")
 
     @staticmethod
     def _inspect_artifacts(output_root: Path, profile: SandboxProfile) -> tuple[list[str], int]:

@@ -4,6 +4,7 @@ from collections.abc import Mapping
 from typing import Any
 
 from traceguard.policy.authorization import duplicate_mutation, output
+from traceguard.policy.kernel import CompiledAuthority
 from traceguard.supervisor.agentdojo_pipeline import AgentDojoDeterministicSupervisor
 from traceguard.supervisor.base import Supervisor, enforce_allow_invariants
 from traceguard.supervisor.contracts import (
@@ -47,6 +48,13 @@ class SupervisionGateway:
             raise ValueError("LLM modes require an explicit supervisor")
         self.supervisor = supervisor
         self.available_tools = dict(available_tools or {})
+        if self.task_authority.enforcement_mode == "strict" and mode == "none":
+            raise ValueError("strict authority cannot disable enforcement")
+        self.compiled = (
+            CompiledAuthority.compile(self.task_authority, self.available_tools)
+            if self.task_authority.enforcement_mode == "strict"
+            else None
+        )
 
     def evaluate(
         self,
@@ -67,6 +75,11 @@ class SupervisionGateway:
             consumed_observation_ids=[item.observation_id for item in observations],
             requested_resources=list(requested_resources or []),
         )
+        if self.compiled is not None:
+            checked = self.compiled.evaluate(user_goal, call, observations, self.history)
+            if checked.decision is not Decision.ALLOW:
+                self.escalated = checked.decision is Decision.ESCALATE
+                return call, checked
         if self.supervisor is None:
             return call, SupervisorOutput(
                 decision=Decision.ALLOW,
@@ -103,6 +116,7 @@ class SupervisionGateway:
             return call, output(Decision.ESCALATE, "invalid-tool-schema", "Tool validation failed.")
         if self.mode == "deterministic_llm":
             gate = AgentDojoDeterministicSupervisor()
+            gate.available_tools = self.available_tools
             gate.set_context(previous_calls=self.history, task_authority=self.task_authority)
             checked = gate.evaluate(user_goal, call, observations)
             if checked.decision in {Decision.BLOCK, Decision.ESCALATE}:
@@ -132,8 +146,13 @@ class SupervisionGateway:
                     step_already_rewritten=True,
                 )
             checked = duplicate_mutation(replacement, self.history, self.task_authority)
+            if checked is None and self.compiled is not None:
+                checked = self.compiled.evaluate(user_goal, replacement, observations, self.history)
+                if checked.decision is Decision.ALLOW:
+                    checked = None
             if checked is None and self.mode == "deterministic_llm":
                 gate = AgentDojoDeterministicSupervisor()
+                gate.available_tools = self.available_tools
                 gate.set_context(previous_calls=self.history, task_authority=self.task_authority)
                 checked = gate.evaluate(user_goal, replacement, observations)
                 if checked.decision is Decision.ALLOW:

@@ -21,6 +21,14 @@ class ArtifactLimits(StrictModel):
     max_file_bytes: int = Field(default=8_388_608, ge=1_024, le=1_073_741_824)
 
 
+class InputLimits(StrictModel):
+    max_entries: int = Field(default=1024, ge=1, le=16_384)
+    max_bytes: int = Field(default=16_777_216, ge=1, le=268_435_456)
+    max_file_bytes: int = Field(default=8_388_608, ge=1, le=268_435_456)
+    max_depth: int = Field(default=16, ge=1, le=32)
+    timeout_seconds: float = Field(default=5, gt=0, le=30)
+
+
 class SandboxProfile(StrictModel):
     enabled: bool
     network: Literal["none", "allowlist"]
@@ -29,6 +37,7 @@ class SandboxProfile(StrictModel):
     limits: SandboxLimits
     tmpfs_mb: int = Field(default=64, ge=8, le=1024)
     artifact_limits: ArtifactLimits = Field(default_factory=ArtifactLimits)
+    input_limits: InputLimits = Field(default_factory=InputLimits)
 
 
 class SandboxConfiguration(StrictModel):

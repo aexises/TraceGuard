@@ -4,9 +4,102 @@ from __future__ import annotations
 
 import os
 import stat
+import time
+from collections.abc import Callable
 from contextlib import contextmanager
+from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from uuid import uuid4
+
+
+@dataclass
+class CopyBudget:
+    """Shared traversal/copy limits, enforced while consuming untrusted inputs."""
+
+    max_entries: int = 1024
+    max_bytes: int = 16_777_216
+    max_file_bytes: int = 8_388_608
+    max_depth: int = 16
+    timeout_seconds: float = 5
+    entries: int = 0
+    bytes: int = 0
+    started: float = field(default_factory=time.monotonic)
+
+    def check(self) -> None:
+        if time.monotonic() - self.started > self.timeout_seconds:
+            raise ValueError("input staging time limit exceeded")
+        if self.entries > self.max_entries or self.bytes > self.max_bytes:
+            raise ValueError("input staging entry or byte limit exceeded")
+
+
+def copy_confined(
+    root: Path,
+    raw: str,
+    destination: Path,
+    *,
+    budget: CopyBudget,
+    prohibited: Callable[[str], bool] = lambda _: False,
+) -> None:
+    """Copy opened regular objects without following names after validation.
+
+    Destination must be a new path inside a private staging directory. No symlinks,
+    hardlinked files, special objects or path-based recursive copy are permitted.
+    """
+    parts = _parts(raw)
+
+    def copy_object(parent: int, name: str, relative: str, target: Path, depth: int) -> None:
+        budget.entries += 1
+        budget.check()
+        if depth > budget.max_depth or prohibited(relative):
+            raise ValueError("protected object or input depth limit exceeded")
+        descriptor = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=parent)
+        try:
+            before = os.fstat(descriptor)
+            if stat.S_ISDIR(before.st_mode):
+                target.mkdir(mode=0o700)
+                with os.scandir(descriptor) as children:
+                    for child in children:
+                        copy_object(
+                            descriptor,
+                            child.name,
+                            relative + "/" + child.name,
+                            target / child.name,
+                            depth + 1,
+                        )
+                target.chmod(0o555)
+            elif stat.S_ISREG(before.st_mode) and before.st_nlink == 1:
+                if before.st_size > budget.max_file_bytes:
+                    raise ValueError("input staging per-file limit exceeded")
+                written = 0
+                with target.open("xb") as output:
+                    while True:
+                        budget.check()
+                        chunk = os.read(descriptor, 65_536)
+                        if not chunk:
+                            break
+                        written += len(chunk)
+                        budget.bytes += len(chunk)
+                        budget.check()
+                        if written > budget.max_file_bytes:
+                            raise ValueError("input staging per-file limit exceeded")
+                        output.write(chunk)
+                after = os.fstat(descriptor)
+                if (before.st_size, before.st_mtime_ns, before.st_ctime_ns, before.st_nlink) != (
+                    after.st_size,
+                    after.st_mtime_ns,
+                    after.st_ctime_ns,
+                    after.st_nlink,
+                ):
+                    raise ValueError("input object changed while copying")
+                target.chmod(0o444)
+            else:
+                raise ValueError("input must be a regular non-aliased file or directory")
+        finally:
+            os.close(descriptor)
+
+    with confined_parent(root, raw) as (parent, name):
+        destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        copy_object(parent, name, "/".join(parts), destination, len(parts))
 
 
 def _parts(raw: str) -> tuple[str, ...]:
