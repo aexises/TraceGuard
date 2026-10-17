@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import time
+from copy import copy
 from pathlib import Path
+from threading import RLock
 
 from traceguard.policy.authorization import duplicate_mutation, output
 from traceguard.policy.engine import DeterministicPolicy
@@ -54,12 +56,13 @@ class TraceGuardRuntime:
         sandbox: ContainerRunner | None = None,
         task_authority: TaskAuthority | None = None,
     ) -> None:
+        self._lock = RLock()
         self.tools = tools
-        self.config = config
-        self.policy = policy
-        self.supervisor = supervisor
+        self.config = config.model_copy(deep=True)
+        self.policy = copy(policy) if policy is not None else None
+        self.supervisor = copy(supervisor) if supervisor is not None else None
         self.sandbox = sandbox
-        self.task_authority = task_authority or TaskAuthority()
+        self.task_authority = (task_authority or TaskAuthority()).model_copy(deep=True)
         self.executed_calls: dict[str, list[ToolCall]] = {}
         self.escalated_tasks: set[str] = set()
         if self.policy is not None:
@@ -70,6 +73,12 @@ class TraceGuardRuntime:
             raise ValueError("LLM supervisor is enabled but unavailable")
 
     def execute_call(
+        self, user_task: str, call: ToolCall, observations: list[Observation]
+    ) -> RuntimeResult:
+        with self._lock:
+            return self._execute_call(user_task, call, observations)
+
+    def _execute_call(
         self, user_task: str, call: ToolCall, observations: list[Observation]
     ) -> RuntimeResult:
         started = time.monotonic()

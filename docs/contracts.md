@@ -172,3 +172,14 @@ violation, irrelevance or unnecessary action. Such contradictory decisions escal
 structured JSON does not make an inconsistent authorization executable. SIMULATED is
 handled before tool dispatch and never invokes a real handler or records a real effect.
 Contained execution is not a way to override these final checks.
+
+
+The supported direct filesystem profile uses POSIX descriptor-relative, no-follow reads
+and atomic report replacement. Symlinks, hardlinks and special files cannot alias an
+approved path to another object; reads are bounded during collection. Unsupported
+platform primitives fail closed. This does not authenticate file contents or establish
+that an attacker-writable document is true. Container input staging is a separate
+integration and still needs its own stronger resource and concurrent-mutation gates.
+Runtime configuration and authority are snapshotted; reusable evaluators are copied so
+one runtime cannot overwrite another runtime's task authority. One runtime serializes
+its check/execute/history operations; no cross-process exactly-once claim is made.
