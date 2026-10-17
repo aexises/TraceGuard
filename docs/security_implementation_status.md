@@ -16,7 +16,7 @@ Merge/review in order; later branches depend on earlier security contracts.
 | Filesystem/context isolation | [PR 15](https://github.com/aexises/TraceGuard/pull/15) | No-follow/hardlink-resistant direct reads, atomic writes and isolated runtime authority |
 | Strict deterministic kernel | [PR 16](https://github.com/aexises/TraceGuard/pull/16) | Explicit compiled grants; complete consequential fields; shared conformance and deny precedence |
 | Cache/audit trust | [PR 17](https://github.com/aexises/TraceGuard/pull/17) | Public-key verification, audience/epoch limits, explicit-rejection handling and audit-v2 privacy/integrity |
-| Execution/review lifecycle | Branch `security/10-execution-grants-and-reviews` | Signed grants, action-bound approvals, adapter binding, mandatory online checks and durable SQLite reservations |
+| Execution/review lifecycle | [PR 18](https://github.com/aexises/TraceGuard/pull/18) | Signed grants, action-bound approvals, adapter binding, mandatory online checks and durable SQLite reservations |
 
 **Deterministic policy assessment**
 
