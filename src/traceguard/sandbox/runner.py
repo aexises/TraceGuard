@@ -301,7 +301,7 @@ class ContainerRunner:
                 )
             except (ValueError, OSError) as exc:
                 raise SandboxUnavailable(
-                    "unsafe symbolic-link/aliased input or staging limit exceeded"
+                    "unsafe symbolic-link/aliased/protected input or staging limit exceeded"
                 ) from exc
         _make_tree_readonly(input_root)
 
