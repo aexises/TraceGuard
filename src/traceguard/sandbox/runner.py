@@ -140,6 +140,9 @@ class ContainerRunner:
                 self._stage_inputs(plan.declared_input_paths, input_root)
             if profile.output_mode == "allowlisted":
                 output_root.mkdir(mode=0o777)
+                # mkdir's mode is filtered by the host umask. The container's non-root
+                # UID needs write access to this bind mount, inside a private 0700 parent.
+                output_root.chmod(0o777)
 
             docker_command = self._build_command(
                 container_name,

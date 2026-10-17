@@ -169,7 +169,7 @@ def test_real_artifact_build_exports_only_inspected_output(tmp_path):
         ],
         profile="artifact_build",
     )
-    assert evidence.exit_code == 0
+    assert evidence.exit_code == 0, evidence.stderr
     assert evidence.files_changed == ["result.txt"]
     assert evidence.artifact_directory is not None
     assert (Path(evidence.artifact_directory) / "result.txt").read_text(

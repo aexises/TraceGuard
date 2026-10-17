@@ -1,4 +1,6 @@
 import json
+import os
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -271,6 +273,28 @@ def test_artifact_build_inspects_limits_persists_and_cleans_staging(tmp_path):
     staging_path = mount_source(docker_run(fake), "/traceguard/output")
     assert not staging_path.exists()
     assert any(command[1:3] == ["rm", "--force"] for command in fake.commands)
+
+
+@pytest.mark.parametrize("mask", [0o022, 0o027, 0o077])
+def test_artifact_output_is_writable_by_container_uid_despite_host_umask(tmp_path, mask):
+    fake = FakeDocker()
+
+    def inspect_output_permissions(command):
+        output = mount_source(command, "/traceguard/output")
+        # Docker bind mounts retain host permissions; UID 65532 is not the host owner.
+        assert stat.S_IMODE(output.stat().st_mode) == 0o777
+        # Other host users still cannot traverse the private staging parent.
+        assert stat.S_IMODE(output.parent.stat().st_mode) == 0o700
+        (output / "result.txt").write_text("safe result", encoding="utf-8")
+
+    fake.on_run = inspect_output_permissions
+    original_mask = os.umask(mask)
+    try:
+        evidence = runner(tmp_path, fake).execute(plan("artifact_build"))
+    finally:
+        os.umask(original_mask)
+    assert evidence.exit_code == 0
+    assert evidence.files_changed == ["result.txt"]
 
 
 def test_artifact_build_fails_closed_on_oversized_or_symlink_output(tmp_path):
