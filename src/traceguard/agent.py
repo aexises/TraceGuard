@@ -29,11 +29,13 @@ class EpisodeResult:
         steps: list[RuntimeResult],
         stopped_reason: str,
         final_answer: str | None = None,
+        call_evidence: dict[str, Any] | None = None,
     ) -> None:
         self.observations = observations
         self.steps = steps
         self.stopped_reason = stopped_reason
         self.final_answer = final_answer
+        self.call_evidence = dict(call_evidence or {})
 
 
 class ReActRunner:
@@ -84,7 +86,7 @@ class ReActRunner:
                     )
                     continue
                 return EpisodeResult(observations, steps, "block")
-            if result.trace.episode_outcome == "ESCALATE":
+            if result.trace.episode_outcome in {"ESCALATE", "EXECUTION_UNKNOWN"}:
                 return EpisodeResult(observations, steps, "escalate")
         return EpisodeResult(observations, steps, "max_steps")
 

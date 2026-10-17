@@ -10,6 +10,7 @@ secure-outcome regressions; passing tests do not replace independent security re
 | Persistent authority | Signed bounded transactional SQLite state, stable separated execution keys, restart/recovery, backup/offline rekey, durable revocation and tenant suspension, JSON/concurrency/rate budgets | Restarted grants/reviews, rollback-on-quota, concurrent instances, corrupt/missing state, backup/rekey and ingress regressions |
 | Sandbox and release | Kernel tmpfs byte/inode quotas; bounded isolated export; private hashed quarantine and explicit atomic release; model-provider/final-answer sink gates | Quarantine, tamper/rejection, secret canary, provider withholding and Docker quota canaries |
 | Isolated integration | Separate non-root agent/issuer/executor containers, exact mTLS workload identities and server pins, verified deployed adapter, private persistent state and constrained report publication | Live loopback mTLS and three-container direct-bypass/replay/restart/egress canaries |
+| Evaluation accounting | Dispatch/release/uncertainty separated; novel plans unlabeled; action-bound independent call/effect labels; case/family-clustered paired uncertainty; frozen complete trace-bound comparison protocol | Result-blocking, unknown effects, alternative plans, changed evidence, clustered seeds and incomplete/unmatched protocol regressions |
 
 Sandbox `input_limits` apply while traversing and copying, before Docker starts. The
 workspace and staging parent are application-owned. Concurrently changed objects are
@@ -41,6 +42,9 @@ requires trusted application/source labels and is not general-purpose semantic D
 The isolated integration supports the narrow report store, not arbitrary external providers.
 See `isolated_executor.md` for conformance and target-platform trust assumptions.
 
-Still to deliver: corrected effect metrics and reproducible evaluation; release security
+See `security_evaluation.md` for the implemented evaluation contract and the external
+held-out/adaptive measurements still required. No new live-model efficacy result is claimed.
+
+Still to deliver: release security
 evidence and support policy. External reviewers and application pilots are not arranged.
 The repository owner's distribution license decision remains pending.
