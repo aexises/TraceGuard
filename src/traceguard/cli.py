@@ -29,7 +29,7 @@ from traceguard.experiments import (
     run_experiment,
 )
 from traceguard.policy.engine import DeterministicPolicy, load_default_policy
-from traceguard.release import ReleaseValidationError, validate_release_artifacts
+from traceguard.release import ReleaseValidationError, render_manifest, validate_release_artifacts
 from traceguard.runtime import TraceGuardRuntime
 from traceguard.sandbox.config import default_sandbox_configuration_path
 from traceguard.sandbox.runner import ContainerRunner, SandboxUnavailable
@@ -541,12 +541,16 @@ def _sandbox_benchmark(args: argparse.Namespace) -> int:
 def _release_validate(args: argparse.Namespace) -> int:
     manifests = args.manifest or [Path("deploy/kubernetes/control-plane.yaml")]
     try:
+        if args.output_manifest is not None and len(manifests) != 1:
+            raise ReleaseValidationError("--output-manifest requires exactly one input manifest")
         validate_release_artifacts(
             dockerfile=args.dockerfile,
             manifests=manifests,
             base_image=args.base_image,
             release_image=args.release_image,
         )
+        if args.output_manifest is not None:
+            render_manifest(manifests[0], args.output_manifest, release_image=args.release_image)
     except ReleaseValidationError as exc:
         print(json.dumps({"valid": False, "error": str(exc)}, indent=2), file=sys.stderr)
         return 1
@@ -556,6 +560,8 @@ def _release_validate(args: argparse.Namespace) -> int:
                 "valid": True,
                 "dockerfile": str(args.dockerfile),
                 "manifests": [str(path) for path in manifests],
+                "output_manifest": str(args.output_manifest) if args.output_manifest else None,
+                "scope": "image-reference syntax; not Kubernetes schema or registry verification",
             },
             indent=2,
         )
@@ -752,6 +758,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Kubernetes manifest to validate; repeat for each manifest (default: control-plane)",
     )
     release_validate.add_argument("--base-image", required=True)
+    release_validate.add_argument(
+        "--output-manifest",
+        type=Path,
+        help="write a new deployable-image manifest; never overwrite",
+    )
     release_validate.add_argument(
         "--release-image",
         default=None,

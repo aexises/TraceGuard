@@ -52,6 +52,12 @@ deployment additionally requires Kubernetes 1.27+ and a container registry.
 
 See [setup.md](setup.md) for installation, optional integrations, verification,
 experiments, Docker execution, benchmarks, API development, and deployment guidance.
+Use the locked installation route there for release checks. The Kubernetes template is
+single-replica development only; production persistence and identity adapters remain required.
+`traceguard release-validate --base-image "$PYTHON_IMAGE" --release-image "$TRACEGUARD_IMAGE"`
+checks references; add `--output-manifest artifacts/release/control-plane.yaml` to write a
+new manifest. Follow the separate registry and Kubernetes-schema gates in
+[the container release guide](docs/control_plane.md#container-build-and-release-checks).
 
 ## How it works
 

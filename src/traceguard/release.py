@@ -131,6 +131,28 @@ def validate_manifest(manifest: Path, *, release_image: str | None = None) -> No
             raise ReleaseValidationError(str(exc)) from exc
 
 
+def render_manifest(manifest: Path, output: Path, *, release_image: str | None = None) -> None:
+    """Write a validated manifest without overwriting the template or an existing artifact.
+
+    This validates image-reference syntax only. Kubernetes schema validation and registry
+    verification are separate release gates.
+    """
+    validate_manifest(manifest, release_image=release_image)
+    lines = manifest.read_text(encoding="utf-8").splitlines(keepends=True)
+    for image in manifest_images(manifest):
+        if "REPLACE_WITH_RELEASE_DIGEST" in image.value and release_image is not None:
+            lines[image.line - 1] = lines[image.line - 1].replace(image.value, release_image, 1)
+    rendered = "".join(lines)
+    if "REPLACE_WITH_RELEASE_DIGEST" in rendered:
+        raise ReleaseValidationError("rendered manifest still contains a release placeholder")
+    try:
+        output.parent.mkdir(parents=True, exist_ok=True)
+        with output.open("x", encoding="utf-8") as stream:
+            stream.write(rendered)
+    except OSError as exc:
+        raise ReleaseValidationError(f"cannot write new manifest {output}: {exc}") from exc
+
+
 def validate_release_artifacts(
     *, dockerfile: Path, manifests: list[Path], base_image: str, release_image: str | None = None
 ) -> None:

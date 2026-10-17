@@ -29,21 +29,28 @@ Optional integrations:
 ## Clone and install
 
 ```bash
-git clone <YOUR_TRACEGUARD_REPOSITORY_URL>
-cd AAI-project
+git clone https://github.com/aexises/TraceGuard.git
+cd TraceGuard
 
-python3.11 -m venv .venv
+python3.11 -m pip install uv==0.13.1
+uv lock --check
+uv sync --locked --extra dev --no-install-project
+uv sync --locked --extra dev --no-build-isolation --no-editable
 source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -e '.[dev]'
 ```
 
-Install optional capabilities only when needed:
+The first sync installs locked build tools before building the package. The second
+uses those tools without an isolated, independently resolved build environment and
+installs a regular wheel rather than an editable package.
+Do not regenerate `uv.lock` during installation. The older `pip install -e '.[dev]'`
+command remains usable for development but does not reproduce the release environment.
+
+Install optional capabilities only when needed, retaining the same build-tools phase:
 
 ```bash
-python -m pip install -e '.[dev,gemini]'
-python -m pip install -e '.[dev,agentdojo]'
-python -m pip install -e '.[dev,datasets,inspect]'
+uv sync --locked --extra dev --extra gemini --no-install-project
+uv sync --locked --extra dev --extra gemini --no-build-isolation --no-editable
+# Substitute --extra agentdojo or --extra datasets --extra inspect as needed.
 ```
 
 Do not commit virtual environments, API keys, generated experiment output, or secret files.
@@ -300,7 +307,8 @@ Install the normal package dependencies, then generate a dedicated local signing
 
 ```bash
 export TRACEGUARD_SIGNING_KEY="$(openssl rand -hex 32)"
-export TRACEGUARD_DEV_TOKEN="replace-this-development-token"
+export TRACEGUARD_DEV_TOKEN="$(openssl rand -hex 32)"
+export TRACEGUARD_ALLOW_IN_MEMORY=1
 traceguard-api
 ```
 
@@ -428,29 +436,31 @@ mediated client. Enforce uninstrumented workload egress separately at the networ
 
 ## Kubernetes deployment
 
-The starter manifest is `deploy/kubernetes/control-plane.yaml`. Before applying it:
+The starter manifest is `deploy/kubernetes/control-plane.yaml`. It is a disposable,
+single-replica development deployment with a `Recreate` strategy. Its in-memory state
+is lost on restart; scaling it is unsupported. Do not expose it to production traffic.
 
-1. Build an image from `Dockerfile` using a Python base image pinned by immutable digest.
-2. Push it to your approved registry and replace `REPLACE_WITH_RELEASE_DIGEST` with that digest.
-3. Store a high-entropy signing key in your cloud secret manager and synchronize it into the
-   `traceguard-secrets` Kubernetes secret as `signing-key`.
-4. Configure TLS ingress, NetworkPolicies, resource quotas, backups, and pod-disruption budget
-   according to your cluster standard.
-5. Replace the in-memory control-plane adapters before exposing the service.
+Follow [Container build and release checks](docs/control_plane.md#container-build-and-release-checks)
+to build with a local tag, verify the published image digest, generate a manifest with
+`release-validate --output-manifest`, and validate its Kubernetes schema. Do not apply
+the checked-in placeholder or use an image digest as a build tag.
 
-Example secret creation for a non-production cluster:
+Create dedicated credentials for a non-production cluster, then apply only the generated
+manifest after completing those checks:
 
 ```bash
 kubectl create namespace traceguard
 kubectl -n traceguard create secret generic traceguard-secrets \
-  --from-literal=signing-key="$(openssl rand -hex 32)"
-kubectl -n traceguard apply -f deploy/kubernetes/control-plane.yaml
+  --from-literal=signing-key="$(openssl rand -hex 32)" \
+  --from-literal=agent-token="$(openssl rand -hex 32)"
+kubectl -n traceguard apply -f artifacts/release/control-plane.yaml
 kubectl -n traceguard rollout status deployment/traceguard-api
 ```
 
-The manifest runs as a non-root user with a read-only root filesystem, dropped Linux
-capabilities, disabled service-account token mounting, resource limits, and health probes.
-It does not create a database, ingress, TLS certificate, queue, or storage bucket.
+The manifest retains non-root execution, a read-only filesystem, dropped capabilities,
+resource limits and health probes. It does not supply persistence, OIDC, ingress, TLS,
+NetworkPolicies, a queue or backups. Production requires replacing the bundled API
+factory and in-memory stores; changing the replica count does not provide durability.
 
 ## Production readiness
 

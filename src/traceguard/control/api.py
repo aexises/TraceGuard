@@ -125,19 +125,29 @@ def create_app(control: ControlPlane, identity: IdentityResolver) -> FastAPI:
 
 
 def _development_app() -> FastAPI:
-    key = os.environ.get("TRACEGUARD_SIGNING_KEY", "development-key-change-me-32-bytes!").encode()
-    tokens = {
-        os.environ.get("TRACEGUARD_DEV_TOKEN", "development-token"): Actor(
-            subject="development-agent", roles={Role.AGENT}, service_key_id="development"
+    if os.environ.get("TRACEGUARD_ALLOW_IN_MEMORY") != "1":
+        raise RuntimeError("In-memory API requires TRACEGUARD_ALLOW_IN_MEMORY=1; development only")
+    key = os.environ.get("TRACEGUARD_SIGNING_KEY", "")
+    token = os.environ.get("TRACEGUARD_DEV_TOKEN", "")
+    if len(key.encode()) < 32 or key == "development-key-change-me-32-bytes!":
+        raise RuntimeError("TRACEGUARD_SIGNING_KEY must be a dedicated key of at least 32 bytes")
+    if len(token) < 32 or token == "development-token":
+        raise RuntimeError(
+            "TRACEGUARD_DEV_TOKEN must be a dedicated token of at least 32 characters"
         )
+    tokens = {
+        token: Actor(subject="development-agent", roles={Role.AGENT}, service_key_id="development")
     }
-    return create_app(ControlPlane(key), token_resolver(tokens))
-
-
-app = _development_app()
+    return create_app(ControlPlane(key.encode()), token_resolver(tokens))
 
 
 def run() -> None:
     import uvicorn
 
-    uvicorn.run("traceguard.control.api:app", host="0.0.0.0", port=8080)
+    uvicorn.run(
+        "traceguard.control.api:_development_app",
+        factory=True,
+        host="0.0.0.0",
+        port=8080,
+        workers=1,
+    )

@@ -5,6 +5,7 @@ import pytest
 from traceguard.cli import main
 from traceguard.release import (
     ReleaseValidationError,
+    render_manifest,
     validate_dockerfile,
     validate_image_digest,
     validate_manifest,
@@ -63,3 +64,70 @@ def test_release_validation_renders_only_a_valid_release_digest(capsys) -> None:
 def test_release_validation_rejects_the_previous_mutable_base_image(capsys) -> None:
     assert main(["release-validate", "--base-image", "python:3.11-slim"]) == 1
     assert "@sha256 digest separator" in capsys.readouterr().err
+
+
+def test_rendered_manifest_is_valid_without_substitution_and_template_is_unchanged(tmp_path):
+    template = Path("deploy/kubernetes/control-plane.yaml")
+    original = template.read_bytes()
+    output = tmp_path / "release.yaml"
+    assert (
+        main(
+            [
+                "release-validate",
+                "--base-image",
+                VALID_BASE_IMAGE,
+                "--release-image",
+                VALID_RELEASE_IMAGE,
+                "--output-manifest",
+                str(output),
+            ]
+        )
+        == 0
+    )
+    validate_manifest(output)
+    assert VALID_RELEASE_IMAGE in output.read_text()
+    assert "REPLACE_WITH_RELEASE_DIGEST" not in output.read_text()
+    assert template.read_bytes() == original
+
+
+def test_render_rejects_invalid_image_without_creating_artifact(tmp_path):
+    output = tmp_path / "release.yaml"
+    with pytest.raises(ReleaseValidationError):
+        render_manifest(
+            Path("deploy/kubernetes/control-plane.yaml"), output, release_image="traceguard:latest"
+        )
+    assert not output.exists()
+
+
+def test_render_never_overwrites_existing_file(tmp_path):
+    output = tmp_path / "release.yaml"
+    output.write_text("keep me")
+    with pytest.raises(ReleaseValidationError, match="cannot write new manifest"):
+        render_manifest(
+            Path("deploy/kubernetes/control-plane.yaml"), output, release_image=VALID_RELEASE_IMAGE
+        )
+    assert output.read_text() == "keep me"
+
+
+def test_render_rejects_multiple_input_manifests(tmp_path):
+    template = "deploy/kubernetes/control-plane.yaml"
+    output = tmp_path / "release.yaml"
+    assert (
+        main(
+            [
+                "release-validate",
+                "--base-image",
+                VALID_BASE_IMAGE,
+                "--release-image",
+                VALID_RELEASE_IMAGE,
+                "--manifest",
+                template,
+                "--manifest",
+                template,
+                "--output-manifest",
+                str(output),
+            ]
+        )
+        == 1
+    )
+    assert not output.exists()

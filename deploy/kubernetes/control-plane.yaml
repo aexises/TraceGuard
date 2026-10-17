@@ -15,7 +15,9 @@ kind: Deployment
 metadata:
   name: traceguard-api
 spec:
-  replicas: 2
+  # Development only: process-local state is lost on restart. Never scale this backend.
+  replicas: 1
+  strategy: {type: Recreate}
   selector:
     matchLabels: {app.kubernetes.io/name: traceguard}
   template:
@@ -31,8 +33,12 @@ spec:
           image: ghcr.io/example/traceguard@sha256:REPLACE_WITH_RELEASE_DIGEST
           ports: [{name: http, containerPort: 8080}]
           env:
+            - name: TRACEGUARD_ALLOW_IN_MEMORY
+              value: "1"
             - name: TRACEGUARD_SIGNING_KEY
               valueFrom: {secretKeyRef: {name: traceguard-secrets, key: signing-key}}
+            - name: TRACEGUARD_DEV_TOKEN
+              valueFrom: {secretKeyRef: {name: traceguard-secrets, key: agent-token}}
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
