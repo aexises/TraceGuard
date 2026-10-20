@@ -372,5 +372,11 @@ covers writes, sync, rename, mirror failure, concurrent reject/release and corru
 C08 implements exact peer admission before HTTP parsing, a total ingress watchdog,
 header/body budgets, handshake and peer connection limits, cleanup and pre-dispatch
 registry revocation. Twelve disposable loopback transport/provider tests pass.
-C09 remains open. Candidate-wide validation and independent review remain pending.
+C09 implements the patched dependency locks, fresh native compatibility and final candidate
+gates. The local Python 3.11 suite passes 540 tests including eleven live Docker cases;
+Python 3.12 passes 529 with those Docker cases separately covered on 3.11. Three-container
+conformance and all four advisory/source scan profiles pass within their recorded scope.
+See `security_remediation_results_20261020.md` for PR mapping, migration limits, exact
+source/image/lock identifiers, CI disposition and external release gates. Independent
+review and release approval remain pending; all nine corrective PRs are drafts.
 No merges or releases are authorized by this plan.
