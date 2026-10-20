@@ -27,7 +27,7 @@ not completeness against arbitrary attacks or superiority over another framework
 
 ## Candidate validation
 
-Executable candidate commit: `da1d3002c85f3f39f8df4c30cbd8e51d728a9ea3`.
+Executable candidate commit: `6b58a35be3d9c9210b76649a54f144a118afc00c`.
 Documentation-only delivery commits may follow; compare the governed source digest rather
 than treating an older green run or a similar branch name as evidence for changed code.
 Final scan metadata records the actual scanned Git revision and governed-source digest.
@@ -60,7 +60,8 @@ Final scan metadata records the actual scanned Git revision and governed-source 
   Ruff, formatting and diff checks passed.
 - Disposable migration tests preserve nonces, amounts, receipts and uncertainty, require
   fencing, verify backup integrity, reject wrong schemas/identities and roll back failed
-  upgrades. These are local recovery tests, not an independently witnessed operational drill.
+  upgrades. Legacy domain reapproval also verifies that unrelated valid task grants survive migration.
+  These are local recovery tests, not an independently witnessed operational drill.
 
 The Linux TLS client may receive an early 403 or an early closed stream for an
 unregistered certificate. The existing end-to-end assertion now permits both denial
@@ -85,9 +86,9 @@ artifacts/package-candidate-20261020.json
 
 | Item | SHA-256 / pinned version |
 | --- | --- |
-| Governed source digest | `c4db0946bb923d4a8499230150d885af399349ed3012906a4dec8436faa44fa7` |
-| Deployed adapter digest | `862d529db051b4637667bf26b349b24dc6a38fd1bfadf060f178eb1564331534` |
-| Local ARM64 image ID | `sha256:05696feb73f6d8c64d6798c730915ddeca80d605facf4bed3bdf00235d5ea712` |
+| Governed source digest | `c4e13399910bc64151e3cba57bf034aecd4ad07ecc2d8078cb72f287bbe988c2` |
+| Deployed adapter digest | `80966806d3fcad3b837ad04b127cc96a6a014a6850cf8eef267ff72b8e8fe200` |
+| Local ARM64 image ID | `sha256:2803433b64d251dc896d872403955d8219a318eacc0f8106d8734aa1b8f0e122` |
 | Pinned Python base image | `sha256:25976e9d34a0fab1f278cae931f34c8303d97bf0c0d7f85b6b4dcf641d7702a4` |
 | Root lock | `02960177bb0aff40d515769f807277be679b76b50b277fd1d49e6ca236ce2f8c` |
 | Native Inspect lock | `0aee8dec127c16b01219504a8d1e57753e717211c3d2d866436554880f455e4a` |
