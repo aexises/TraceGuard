@@ -78,6 +78,7 @@ artifacts/isolation-conformance-candidate-20261020.json
 /private/tmp/traceguard-candidate-py312-final-tests.log
 /private/tmp/traceguard-candidate-build.log
 /private/tmp/traceguard-candidate-package.log
+artifacts/package-candidate-20261020.json
 ```
 
 ## Reproducibility identifiers
@@ -91,8 +92,6 @@ artifacts/isolation-conformance-candidate-20261020.json
 | Root lock | `02960177bb0aff40d515769f807277be679b76b50b277fd1d49e6ca236ce2f8c` |
 | Native Inspect lock | `0aee8dec127c16b01219504a8d1e57753e717211c3d2d866436554880f455e4a` |
 | Native AgentDyn lock | `0d0312cd185b1766b2ac4b76a95768c109c356f45743c7476b00c3ba5383babb` |
-| Built wheel | `e90d3fc99a428d75e54e53298f7476dd9a1cb4fe8ff3282a43312ba1b3e78afa` |
-| Built source distribution | `ac8b3b9e6f659e044429ae62fa3e71807601b0a89291924288c2226112238544` |
 | Tool versions | uv 0.13.1, Gitleaks 8.30.1 (verified archive), pip-audit 2.10.1 |
 
 The image's copied source and adapter match the candidate. The final additions to tests
@@ -101,6 +100,8 @@ do not replace registry provenance/signatures for a release. Pinned VCS `inspect
 revision `99ef14c96efb4a4d36c344b313ca734074af88bf` and AgentDyn `agentdojo` revision
 `5353cf7615b135cace8d07c8f12dac53a16b6db3` are recorded outside registry advisory coverage;
 zero registry findings is not a source audit of those upstream repositories.
+The package evidence JSON records the final wheel/source-distribution hashes and build
+revision separately, avoiding a source archive containing a report with its own hash.
 
 The three original advisories list 3.14.4 as the patch floor. Official PyPI metadata
 reported 3.14.5 at implementation; it was selected and tested without changing the
