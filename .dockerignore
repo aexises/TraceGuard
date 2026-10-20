@@ -4,10 +4,6 @@
 !README.md
 !src/
 !src/**
-!benchmarks/
-!benchmarks/**
-!react_agentdojo/
-!react_agentdojo/**
 !configs/
 !configs/**
 **/__pycache__

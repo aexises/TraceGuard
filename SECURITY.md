@@ -17,9 +17,9 @@ guaranteed response deadline. Coordinate disclosure with the maintainer; do not
 publish sensitive exploit details in a public issue while a report is unresolved.
 
 Use the strict, isolated execution profile for security evaluation. Research-mode
-ablations, application-owned classification labels, local SQLite backup/fencing,
+application-owned classification labels, local SQLite backup/fencing,
 and the narrow report adapter have explicit limitations in
-[the security completion record](docs/security_completion.md). This repository does
+[the verification guide](docs/verification.md). This repository does
 not establish a universal prompt-injection defense or unrestricted connector safety.
 
 Dependency and publication-source secret scans run in CI and weekly. The scans cover

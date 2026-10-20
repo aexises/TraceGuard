@@ -9,7 +9,7 @@ pytest.importorskip("inspect_ai")
 
 from inspect_ai.tool import ToolCall  # noqa: E402
 
-from benchmarks.datasets.inspect_integration import (  # noqa: E402
+from traceguard.integrations.inspect import (  # noqa: E402
     inspect_standard_tools,
     traceguard_inspect_approver,
 )
@@ -17,8 +17,8 @@ from traceguard.types import Decision, RiskLevel  # noqa: E402
 
 
 def test_broader_native_capabilities_require_explicit_research_profile():
-    tools = inspect_standard_tools(terminal=True, memory=True, profile="research")
-    assert len(tools) == 7
+    with pytest.raises(ValueError, match="profile"):
+        inspect_standard_tools(terminal=True, memory=True, profile="research")
     with pytest.raises(ValueError, match="memory"):
         inspect_standard_tools(terminal=True, memory=True)
     assert inspect_standard_tools(terminal=False, memory=False) == []
@@ -27,7 +27,7 @@ def test_broader_native_capabilities_require_explicit_research_profile():
 def test_every_advertised_strict_tool_has_a_reviewed_resource_mapping():
     from inspect_ai.tool import ToolDef
 
-    from benchmarks.datasets.inspect_integration import inspect_read_schema
+    from traceguard.integrations.inspect import inspect_read_schema
     from traceguard.policy.kernel import CompiledAuthority
     from traceguard.types import TaskAuthority
     from traceguard.types import ToolCall as Proposal

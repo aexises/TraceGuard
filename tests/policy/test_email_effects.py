@@ -52,10 +52,9 @@ def test_authorized_cc_and_empty_optional_sinks_preserve_utility():
 
 
 def test_native_email_cannot_release_extra_destinations_or_attachments():
-    pytest.importorskip("agentdojo")
-    from traceguard.supervisor.agentdojo_pipeline import AgentDojoDeterministicSupervisor
+    from traceguard.supervisor.deterministic import DeterministicSupervisor
 
-    gate = AgentDojoDeterministicSupervisor()
+    gate = DeterministicSupervisor()
     gate.set_context(
         previous_calls=[],
         task_authority=TaskAuthority(

@@ -3,17 +3,17 @@
 `inspect_standard_tools` defaults to the strict profile: only native `read_file`,
 `list_files` and `grep` when terminal capability is declared. Bash, Python, editor and
 memory are removed from that advertised strict surface. `memory=True` in strict mode
-raises a configuration error. Explicit `profile="research"` retains the broader native
-tools for labelled ablations; it is not a supported strict shell implementation.
+raises a configuration error. Unsupported native shell/editor capabilities have no
+product factory profile.
 No command name is added to a generic allowlist to manufacture shell support.
 
 `traceguard_inspect_approver` is a pre-tool policy callback. In strict mode it rejects
 all consequential/unknown tools even when gateway evaluation permits the proposal.
 An approval callback cannot determine whether an operation actually ran, and native
 history text is not definitive provider accounting. Do not configure approval alone as
-the security boundary for side effects. Research ablations retain their labelled behavior.
+the security boundary for side effects.
 
-Use `GuardedInspectExecutor` from `benchmarks.datasets.inspect_executor` in a trusted
+Use `GuardedInspectExecutor` from `traceguard.integrations.inspect_executor` in a trusted
 solver/application loop for native string-result tool effects. Construct a strict
 `SupervisionGateway` with schemas from the actual `ToolDef.parameters` using
 `model_dump(mode="json", exclude_none=True)`, the approved task scope, a provisioned

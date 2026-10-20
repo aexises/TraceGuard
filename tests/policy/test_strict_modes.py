@@ -1,6 +1,6 @@
 import pytest
 
-from benchmarks.datasets.gateway import SupervisionGateway
+from traceguard.integrations.gateway import SupervisionGateway
 from traceguard.supervisor.contracts import SupervisorResponse
 from traceguard.supervisor.llm import QwenSupervisor
 from traceguard.types import Decision, TaskAuthority, ToolCall

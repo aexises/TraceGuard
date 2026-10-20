@@ -4,18 +4,18 @@ from copy import copy
 from dataclasses import replace
 from pathlib import Path
 
+from traceguard._enforcement import GuardedExecution
 from traceguard.ledger import ExecutionLedger
 from traceguard.policy.authorization import effect_registry
 from traceguard.policy.engine import DeterministicPolicy, load_default_policy
 from traceguard.release_gate import GuardedProvider, ReleaseGate
-from traceguard.runtime import TraceGuardRuntime
 from traceguard.sandbox.runner import ContainerRunner
 from traceguard.supervisor.base import Supervisor
 from traceguard.tools.registry import ToolRegistry
-from traceguard.types import SafeguardConfig, TaskAuthority
+from traceguard.types import EnforcementConfig, TaskAuthority
 
 
-class SecuredTools(TraceGuardRuntime):
+class SecuredTools(GuardedExecution):
     def __init__(
         self,
         tools: ToolRegistry,
@@ -51,8 +51,7 @@ class SecuredTools(TraceGuardRuntime):
             raise ValueError("trusted ledger_id is required with ledger_path")
         super().__init__(
             tools,
-            SafeguardConfig(
-                deterministic_policy=True,
+            EnforcementConfig(
                 llm_supervisor=supervisor is not None,
                 post_run_reevaluation=post_run_reevaluation,
             ),

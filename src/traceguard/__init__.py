@@ -1,4 +1,4 @@
-"""TraceGuard supervised tool-agent research runtime."""
+"""TraceGuard security framework for application-owned agent actions."""
 
 from traceguard.types import Decision, RiskLevel, ToolCall
 

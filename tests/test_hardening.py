@@ -3,17 +3,12 @@ from pathlib import Path
 
 import pytest
 
-from benchmarks.datasets.gateway import SupervisionGateway
-from traceguard.agent import ReActRunner, ScriptedAgent
+from traceguard._enforcement import GuardedExecution
+from traceguard.integrations.gateway import SupervisionGateway
 from traceguard.policy import load_default_policy
 from traceguard.policy.authorization import check_authority, infer_provenance, tool_effect
 from traceguard.policy.engine import DeterministicPolicy
-from traceguard.runtime import TraceGuardRuntime
-from traceguard.supervisor.agentdojo_pipeline import (
-    _executed_calls,
-    build_supervised_agentdojo_pipeline,
-    observations_from_messages,
-)
+from traceguard.policy.read_resources import bind_read_schema
 from traceguard.supervisor.contracts import (
     SupervisorRequest,
     SupervisorResponse,
@@ -26,11 +21,11 @@ from traceguard.supervisor.redaction import redact_request
 from traceguard.tools.registry import default_registry
 from traceguard.types import (
     Decision,
+    EnforcementConfig,
     GoalNecessity,
     GoalRelevance,
     Observation,
     RiskLevel,
-    SafeguardConfig,
     TaskAuthority,
     ToolCall,
     TrustLabel,
@@ -257,7 +252,12 @@ def test_escalation_latches_gateway_and_block_replan_recovers(tmp_path):
     gateway = SupervisionGateway(
         mode="deterministic_llm",
         supervisor=QwenSupervisor(provider=provider),
-        available_tools={"calculator": {"type": "object"}},
+        available_tools={
+            "calculator": bind_read_schema(
+                {"type": "object"}, adapter_id="embedded-v1", tool_name="calculator"
+            )
+        },
+        task_authority=TaskAuthority(enforcement_mode="strict", allowed_tools=["calculator"]),
     )
     for i in range(2):
         _, output = gateway.evaluate(
@@ -270,23 +270,6 @@ def test_escalation_latches_gateway_and_block_replan_recovers(tmp_path):
         )
         assert output.decision is Decision.ESCALATE
     assert len(provider.requests) == 1
-    runtime = TraceGuardRuntime(
-        default_registry(tmp_path, tmp_path / "artifacts"),
-        SafeguardConfig(deterministic_policy=True),
-        policy=DeterministicPolicy(load_default_policy()),
-    )
-    episode = ReActRunner(
-        runtime,
-        ScriptedAgent(
-            [
-                call("restricted_command", command=["echo", "x"]),
-                call("calculator", expression="2+2"),
-            ]
-        ),
-    ).run("Calculate 2+2")
-    assert episode.steps[0].trace.episode_outcome == "BLOCK"
-    assert episode.steps[1].observation.content == "4"
-    assert "POLICY_" not in episode.observations[0].content
 
 
 def test_redacted_distinct_values_retain_equality():
@@ -295,88 +278,6 @@ def test_redacted_distinct_values_retain_equality():
     assert "alpha" not in json.dumps(payload) and "beta" not in json.dumps(payload)
     assert payload["body"].count(payload["secret"]) == 2
     SupervisorRequest(user_goal="Calculate", proposed_call=call("calculator", expression="2+2"))
-
-
-def test_native_agentdojo_escalates_without_executing_or_replanning():
-    pytest.importorskip("agentdojo")
-    from agentdojo.functions_runtime import EmptyEnv, FunctionCall, FunctionsRuntime, make_function
-
-    effects = []
-
-    def send_email(to: str) -> str:
-        """Send an email.
-
-        Args:
-            to: Destination.
-        """
-        effects.append(to)
-        return "sent"
-
-    class Agent:
-        name = "test-agent"
-        calls = 0
-
-        def query(self, query, runtime, env, messages, extra_args):
-            self.calls += 1
-            return (
-                query,
-                runtime,
-                env,
-                [
-                    *messages,
-                    {
-                        "role": "assistant",
-                        "content": [],
-                        "tool_calls": [
-                            FunctionCall(function="send_email", args={"to": "a@example.test"})
-                        ],
-                    },
-                ],
-                extra_args,
-            )
-
-    agent = Agent()
-    pipeline = build_supervised_agentdojo_pipeline(
-        agent,
-        max_steps=5,
-        tool_output_format="json",
-        supervisor_name="deterministic",
-        supervisor_model="unused",
-        supervisor_url="",
-        supervisor_max_retries=0,
-        supervisor_timeout=1,
-        supervisor_confidence_threshold=0.55,
-        supervisor_enable_rewrite=False,
-        supervisor_deterministic_enabled=True,
-        supervisor_log_path=None,
-        gemini_api_key=None,
-        gemini_base_url=None,
-        ollama_url="",
-    )
-    _, _, _, messages, extra = pipeline.query(
-        "Send Alice a note", FunctionsRuntime([make_function(send_email)]), EmptyEnv(), [], {}
-    )
-    assert extra["traceguard_stopped"] == "ESCALATE"
-    assert agent.calls == 1
-    assert not effects
-    assert _executed_calls(messages) == []
-
-
-def test_stable_native_observation_ids_and_success_only_history():
-    pytest.importorskip("agentdojo")
-    from agentdojo.functions_runtime import FunctionCall
-
-    native = FunctionCall(function="get_weather", args={}, id="call-1")
-    messages = [
-        {"role": "assistant", "tool_calls": [native]},
-        {"role": "tool", "tool_call_id": "call-1", "content": "sunny", "error": None},
-    ]
-    assert observations_from_messages(messages)[0].observation_id == (
-        observations_from_messages(messages)[0].observation_id
-    )
-    assert len(_executed_calls(messages)) == 1
-    messages[-1]["error"] = "invalid"
-    assert not _executed_calls(messages)
 
 
 def test_cumulative_payment_budget_and_nonfinite_values():
@@ -450,10 +351,13 @@ def test_corpus_rejects_sensitive_objects_and_symlinks(tmp_path):
 
 def test_custom_runtime_latches_escalation_and_records_success_history(tmp_path):
     provider = Provider(fail=True)
-    runtime = TraceGuardRuntime(
+    runtime = GuardedExecution(
         default_registry(tmp_path, tmp_path / "artifacts"),
-        SafeguardConfig(llm_supervisor=True),
+        EnforcementConfig(llm_supervisor=True),
         supervisor=QwenSupervisor(provider=provider),
+        task_authority=TaskAuthority(enforcement_mode="strict", allowed_tools=["calculator"]),
+        bound_task_id="test",
+        policy=DeterministicPolicy(load_default_policy()),
     )
     proposal = call("calculator", expression="2+2")
     for _ in range(2):
@@ -514,88 +418,6 @@ def test_canonical_provider_envelopes_and_distinct_post_run_prompt():
     assert "post-execution" in Path("src/traceguard/prompts/post_run_v1.txt").read_text()
 
 
-def test_native_rewrite_is_validated_then_rechecked(monkeypatch):
-    pytest.importorskip("agentdojo")
-    from agentdojo.functions_runtime import EmptyEnv, FunctionCall, FunctionsRuntime, make_function
-
-    from traceguard.policy.authorization import output
-
-    effects, contexts = [], []
-
-    def search_products(query: str) -> str:
-        """Search products.
-
-        Args:
-            query: Search query.
-        """
-        effects.append(query)
-        return "fixture"
-
-    class Stub:
-        count = 0
-
-        def set_context(self, **context):
-            contexts.append(context)
-
-        def evaluate(self, goal, proposal, observations):
-            self.count += 1
-            if self.count == 1:
-                replacement = proposal.model_copy(update={"arguments": {"query": "laptop"}})
-                return output(Decision.BLOCK, "placeholder", "placeholder").model_copy(
-                    update={"decision": Decision.REWRITE, "rewritten_call": replacement}
-                )
-            return output(Decision.BLOCK, "recheck-block", "Replacement is not authorized")
-
-    monkeypatch.setattr(
-        "traceguard.supervisor.agentdojo_pipeline.QwenSupervisor", lambda **kw: Stub()
-    )
-
-    class Agent:
-        name = "test-agent"
-
-        def query(self, query, runtime, env, messages, extra_args):
-            return (
-                query,
-                runtime,
-                env,
-                [
-                    *messages,
-                    {
-                        "role": "assistant",
-                        "content": [],
-                        "tool_calls": [
-                            FunctionCall(function="search_products", args={"query": "all"})
-                        ],
-                    },
-                ],
-                extra_args,
-            )
-
-    pipeline = build_supervised_agentdojo_pipeline(
-        Agent(),
-        max_steps=3,
-        tool_output_format="json",
-        supervisor_name="ollama",
-        supervisor_model="unused",
-        supervisor_url="",
-        supervisor_max_retries=0,
-        supervisor_timeout=1,
-        supervisor_confidence_threshold=0.55,
-        supervisor_enable_rewrite=True,
-        supervisor_deterministic_enabled=True,
-        supervisor_log_path=None,
-        gemini_api_key=None,
-        gemini_base_url=None,
-        ollama_url="",
-    )
-    _, _, _, _, extra = pipeline.query(
-        "Search for laptops", FunctionsRuntime([make_function(search_products)]), EmptyEnv(), [], {}
-    )
-    assert extra["traceguard_stopped"] == "ESCALATE"
-    assert contexts[-1]["step_already_rewritten"] is True
-    assert not effects
-
-
 @pytest.mark.parametrize("hybrid", [False, True])
 def test_identical_mutation_needs_explicit_repeat_authority(hybrid):
     from traceguard.policy.authorization import duplicate_mutation
@@ -612,83 +434,6 @@ def test_identical_mutation_needs_explicit_repeat_authority(hybrid):
     assert guard.evaluate("Send hello to a@example.test", proposal, []).decision is Decision.ALLOW
     read = call("get_weather")
     assert duplicate_mutation(read, [read], TaskAuthority()) is None
-
-
-@pytest.mark.parametrize(
-    "second_amount, rule", [(60, "duplicate-mutation"), (50, "amount-out-of-scope")]
-)
-def test_native_batch_reserves_mutations_and_payment_budget(second_amount, rule):
-    pytest.importorskip("agentdojo")
-    from agentdojo.functions_runtime import EmptyEnv, FunctionCall, FunctionsRuntime, make_function
-
-    effects = []
-
-    def send_money(recipient: str, amount: float) -> str:
-        """Send money.
-
-        Args:
-            recipient: Destination.
-            amount: Payment amount.
-        """
-        effects.append(amount)
-        return "sent"
-
-    class Agent:
-        name = "test-agent"
-        calls = 0
-
-        def query(self, query, runtime, env, messages, extra_args):
-            self.calls += 1
-            proposals = (
-                [
-                    FunctionCall(
-                        function="send_money",
-                        args={"recipient": "a@example.test", "amount": amount},
-                    )
-                    for amount in [60, second_amount]
-                ]
-                if self.calls == 1
-                else []
-            )
-            return (
-                query,
-                runtime,
-                env,
-                [*messages, {"role": "assistant", "content": [], "tool_calls": proposals}],
-                extra_args,
-            )
-
-    pipeline = build_supervised_agentdojo_pipeline(
-        Agent(),
-        max_steps=3,
-        tool_output_format="json",
-        supervisor_name="deterministic",
-        supervisor_model="unused",
-        supervisor_url="",
-        supervisor_max_retries=0,
-        supervisor_timeout=1,
-        supervisor_confidence_threshold=0.55,
-        supervisor_enable_rewrite=False,
-        supervisor_deterministic_enabled=True,
-        supervisor_log_path=None,
-        gemini_api_key=None,
-        gemini_base_url=None,
-        ollama_url="",
-        task_authority=TaskAuthority(allowed_tools=["send_money"], max_amount=100),
-    )
-    _, _, _, messages, extra = pipeline.query(
-        "Send money to a@example.test",
-        FunctionsRuntime([make_function(send_money)]),
-        EmptyEnv(),
-        [],
-        {},
-    )
-    assert effects == [60]
-    assert len(_executed_calls(messages)) == 1
-    decisions = extra["traceguard_supervisor_decisions"]
-    assert decisions[0]["decision"] == "ALLOW"
-    assert decisions[1]["decision"] == "BLOCK"
-    assert rule in decisions[1]["matched_rules"]
 
 
 @pytest.mark.parametrize("mode", ["llm", "deterministic_llm"])
@@ -714,6 +459,12 @@ def test_gateway_rewrite_cannot_repeat_and_escalation_remains_terminal(mode):
         mode=mode,
         supervisor=supervisor,
         available_tools={"send_email": {"type": "object"}},
+        task_authority=TaskAuthority(
+            enforcement_mode="strict",
+            allowed_tools=["send_email"],
+            argument_values={"send_email": {"to": "a@example.test"}},
+            generated_fields={"send_email": ["body"]},
+        ),
     )
     gateway.history.append(call("send_email", to="a@example.test", body="hello"))
     kwargs = dict(
@@ -761,7 +512,13 @@ def test_gateway_does_not_attribute_a_previous_provider_call_to_a_hard_gate():
     gateway = SupervisionGateway(
         mode="deterministic_llm",
         supervisor=supervisor,
-        available_tools={"calculator": {"type": "object"}, "send_email": {"type": "object"}},
+        available_tools={
+            "calculator": bind_read_schema(
+                {"type": "object"}, adapter_id="embedded-v1", tool_name="calculator"
+            ),
+            "send_email": {"type": "object"},
+        },
+        task_authority=TaskAuthority(enforcement_mode="strict", allowed_tools=["calculator"]),
     )
     kwargs = dict(task_id="test", step_id=0, user_goal="Calculate 2+2", observations=[])
     gateway.evaluate(**kwargs, tool_name="calculator", arguments={"expression": "2+2"})

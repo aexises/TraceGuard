@@ -7,10 +7,10 @@ pytest.importorskip("inspect_ai")
 from inspect_ai.model import ChatMessageTool  # noqa: E402
 from inspect_ai.tool import ToolCall, ToolDef, tool  # noqa: E402
 
-from benchmarks.datasets.gateway import SupervisionGateway  # noqa: E402
-from benchmarks.datasets.inspect_executor import GuardedInspectExecutor  # noqa: E402
-from benchmarks.datasets.inspect_integration import traceguard_inspect_approver  # noqa: E402
 from traceguard.control.service import AuthorizationError  # noqa: E402
+from traceguard.integrations.gateway import SupervisionGateway  # noqa: E402
+from traceguard.integrations.inspect import traceguard_inspect_approver  # noqa: E402
+from traceguard.integrations.inspect_executor import GuardedInspectExecutor  # noqa: E402
 from traceguard.ledger import ExecutionLedger, ExecutionUnknown  # noqa: E402
 from traceguard.types import TaskAuthority  # noqa: E402
 
