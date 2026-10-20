@@ -56,7 +56,8 @@ validation. The manual candidate signing workflow has not been executed.
 The original follow-up series covers #21 staging/strict mode, #22 durable effects,
 #23 persistent authority, #24 sandbox/data release, #25 isolated execution,
 #26 effect-grounded evaluation, and #27 release assurance. The prerequisites are now
-included in `main`; #27 targets `main` rather than the merged executor branch.
+included in `main`. GitHub manages #27's base as part of the PR stack; its branch
+incorporates current `main` to resolve overlap without rewriting feature history.
 The subsequent corrective series #28–#36 remains separate. Merge status does not
 establish deployment, live-model efficacy or independent security review.
 
