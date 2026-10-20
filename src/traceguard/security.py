@@ -28,6 +28,8 @@ class SecuredTools(TraceGuardRuntime):
         model_input_label: str = "unclassified",
         supervisor: Supervisor | None = None,
         sandbox: ContainerRunner | None = None,
+        post_run_reevaluation: bool = False,
+        result_policy_version: str = "embedded-result-v1",
     ):
         strict = authority.model_copy(deep=True, update={"enforcement_mode": "strict"})
         self.release_gate = replace(
@@ -49,7 +51,11 @@ class SecuredTools(TraceGuardRuntime):
             raise ValueError("trusted ledger_id is required with ledger_path")
         super().__init__(
             tools,
-            SafeguardConfig(deterministic_policy=True, llm_supervisor=supervisor is not None),
+            SafeguardConfig(
+                deterministic_policy=True,
+                llm_supervisor=supervisor is not None,
+                post_run_reevaluation=post_run_reevaluation,
+            ),
             policy=DeterministicPolicy(load_default_policy()),
             supervisor=supervisor,
             sandbox=sandbox,
@@ -60,6 +66,7 @@ class SecuredTools(TraceGuardRuntime):
                 else None
             ),
             bound_task_id=task_id,
+            result_policy_version=result_policy_version,
         )
 
     def release_answer(self, proposed: str, *, label: str = "unclassified") -> str:

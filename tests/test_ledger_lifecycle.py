@@ -124,21 +124,30 @@ def test_known_complete_budget_and_fenced_reconciliation_preserve_utility(tmp_pa
         actor="operator",
         provider_reference="provider-1",
         pending_worker_fenced=True,
+        disposition="accepted_for_agent",
     )
     reserve(ledger, "second", amount="40")
-    ledger.finish("second", "succeeded", "receipt-2")
+    ledger.finish("second", "succeeded", "receipt-2", disposition="accepted_for_agent")
     with pytest.raises(AuthorizationError, match="budget"):
         reserve(ledger, "third", amount="1")
 
 
 def legacy_ledger(path):
-    # Build the exact pre-C02 schema using the provisioning definition, then remove metadata.
-    identity = ExecutionLedger.provision(path)
-    ledger = ExecutionLedger(path, expected_store_id=identity)
-    reserve(ledger)
-    ledger.finish("first", "unknown")
     with sqlite3.connect(path) as connection:
-        connection.execute("DROP TABLE ledger_metadata")
+        connection.execute("""CREATE TABLE executions (
+            nonce TEXT PRIMARY KEY, tenant TEXT NOT NULL, principal TEXT NOT NULL,
+            credential TEXT NOT NULL, task TEXT NOT NULL, idempotency_key TEXT NOT NULL,
+            digest TEXT NOT NULL, effect_digest TEXT NOT NULL, amount TEXT NOT NULL,
+            status TEXT NOT NULL, result TEXT,
+            UNIQUE(tenant,principal,credential,task,idempotency_key))""")
+        connection.execute("""CREATE TABLE reconciliations (
+            nonce TEXT NOT NULL, actor TEXT NOT NULL, status TEXT NOT NULL,
+            provider_reference TEXT NOT NULL,
+            resolved_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)""")
+        connection.execute(
+            "INSERT INTO executions VALUES "
+            "('first','tenant','agent','credential','task','first','first','first','60','unknown',NULL)"
+        )
 
 
 def test_fenced_legacy_migration_preserves_unknown_effect_and_verified_backup(tmp_path):

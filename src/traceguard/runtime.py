@@ -63,10 +63,14 @@ class TraceGuardRuntime:
         task_authority: TaskAuthority | None = None,
         effect_ledger: ExecutionLedger | None = None,
         bound_task_id: str | None = None,
+        result_policy_version: str = "embedded-result-v1",
     ) -> None:
         self._lock = RLock()
         self.effect_ledger = effect_ledger
         self.bound_task_id = bound_task_id
+        if not result_policy_version:
+            raise ValueError("result policy version must be explicit and nonempty")
+        self.result_policy_version = result_policy_version
         self.tools = tools
         self.config = config.model_copy(deep=True)
         self.policy = copy(policy) if policy is not None else None
@@ -200,6 +204,18 @@ class TraceGuardRuntime:
                 observation,
             )
         reserved = False
+        result_policy = hashlib.sha256(
+            canonical(
+                {
+                    "version": self.result_policy_version,
+                    "authority": self.compiled_authority.digest
+                    if self.compiled_authority
+                    else None,
+                    "post_run": self.config.post_run_reevaluation,
+                    "policy": self.policy.config.model_dump(mode="json") if self.policy else None,
+                }
+            )
+        ).hexdigest()
         if self.effect_ledger is not None and tool_effect(effective_call) in {"mutate", "command"}:
             payload = {
                 "tool": effective_call.tool_name,
@@ -222,8 +238,26 @@ class TraceGuardRuntime:
                         else None
                     ),
                     repeatable=effective_call.tool_name in self.task_authority.repeatable_tools,
+                    result_policy=result_policy,
                 )
                 if replay is not None:
+                    if replay["disposition"] != "accepted_for_agent" or replay["result"] is None:
+                        outcome = (
+                            "BLOCK_RESULT" if replay["disposition"] == "withheld" else "ESCALATE"
+                        )
+                        return RuntimeResult(
+                            self._trace(
+                                call,
+                                effective_call,
+                                outputs,
+                                plan,
+                                None,
+                                started,
+                                outcome,
+                                execution_status="replayed",
+                            ),
+                            None,
+                        )
                     observation = Observation.model_validate_json(replay["result"])
                     return RuntimeResult(
                         self._trace(
@@ -270,11 +304,50 @@ class TraceGuardRuntime:
             )
             if reserved:
                 self.effect_ledger.finish(
-                    effective_call.call_id, "succeeded", self._receipt(observation)
+                    effective_call.call_id,
+                    "succeeded",
+                    self._receipt(observation),
+                    disposition="pending_review"
+                    if self.config.post_run_reevaluation
+                    else "accepted_for_agent",
                 )
             post_run = None
-            if self.config.post_run_reevaluation and self.supervisor:
-                post_run = self.supervisor.reevaluate(user_task, effective_call, evidence)
+            if self.config.post_run_reevaluation:
+                try:
+                    if self.supervisor is None:
+                        raise ValueError("post-run review requires a supervisor")
+                    post_run = self.supervisor.reevaluate(user_task, effective_call, evidence)
+                    if post_run is None:
+                        raise ValueError("post-run review returned no disposition")
+                except Exception:
+                    if reserved:
+                        self.effect_ledger.decide_result(
+                            effective_call.call_id, "review_required", result_policy=result_policy
+                        )
+                    return RuntimeResult(
+                        self._trace(
+                            call,
+                            effective_call,
+                            outputs,
+                            plan,
+                            observation,
+                            started,
+                            "ESCALATE",
+                            execution_status="dispatched",
+                        ),
+                        None,
+                    )
+                if reserved:
+                    disposition = (
+                        "accepted_for_agent"
+                        if post_run.disposition is PostRunDisposition.ACCEPT_RESULT
+                        else "withheld"
+                        if post_run.disposition is PostRunDisposition.BLOCK_RESULT
+                        else "review_required"
+                    )
+                    self.effect_ledger.decide_result(
+                        effective_call.call_id, disposition, result_policy=result_policy
+                    )
             if post_run and post_run.disposition is not PostRunDisposition.ACCEPT_RESULT:
                 if post_run.disposition is PostRunDisposition.BLOCK_RESULT and hasattr(
                     self.sandbox, "reject_artifacts"
@@ -338,7 +411,10 @@ class TraceGuardRuntime:
             raise
         if reserved:
             self.effect_ledger.finish(
-                effective_call.call_id, "succeeded", self._receipt(observation)
+                effective_call.call_id,
+                "succeeded",
+                self._receipt(observation),
+                disposition="accepted_for_agent",
             )
         self.executed_calls.setdefault(call.task_id, []).append(effective_call)
         outcome = (

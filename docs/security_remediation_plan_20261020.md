@@ -355,5 +355,7 @@ Implementation status (20 October 2026): C01 implements R01 with six new durable
 registration regressions; the focused authority/executor suite passes (25 tests).
 C02 implements identified provisioning, domain-bound grants, durable task holds and
 fenced legacy migration; lifecycle and regression evidence accompanies its corrective PR.
-C03–C09 remain open. Candidate-wide validation and independent review remain pending.
+C03 implements separate durable result disposition, policy-bound replay and conservative
+legacy receipt migration. Its restart/fault regressions preserve withholding without redispatch.
+C04–C09 remain open. Candidate-wide validation and independent review remain pending.
 No merges or releases are authorized by this plan.
