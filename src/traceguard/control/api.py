@@ -34,7 +34,7 @@ def token_resolver(tokens: dict[str, Actor]) -> IdentityResolver:
         actor = tokens.get(authorization.removeprefix("Bearer "))
         if actor is None:
             raise AuthorizationError("invalid bearer credential")
-        return actor
+        return actor.model_copy(deep=True)
 
     return resolve
 
@@ -44,6 +44,14 @@ def create_app(control: ControlPlane, identity: IdentityResolver) -> FastAPI:
 
     execution = ExecutionAuthority(control)
     app = FastAPI(title="TraceGuard Control Plane", version="1.0.0")
+    from traceguard.control.admission import RequestLimits
+    from traceguard.control.storage import CapacityError
+
+    app.add_middleware(RequestLimits, identity=identity)
+
+    @app.exception_handler(CapacityError)
+    async def exhausted(_: Request, exc: CapacityError) -> JSONResponse:
+        return JSONResponse(status_code=503, content={"detail": str(exc)})
 
     def actor(authorization: Annotated[str | None, Header()] = None) -> Actor:
         try:
@@ -72,6 +80,20 @@ def create_app(control: ControlPlane, identity: IdentityResolver) -> FastAPI:
         tenant_id: str, registration: TaskRegistration, current: Actor = Depends(actor)
     ) -> dict[str, str]:
         return {"authority_digest": execution.register(tenant_id, current, registration)}
+
+    @app.post("/v1/credentials/{credential_id}/revoke")
+    def revoke(
+        credential_id: str, tenant_id: str, current: Actor = Depends(actor)
+    ) -> dict[str, bool]:
+        control.revoke_credential(tenant_id, current, credential_id)
+        return {"revoked": True}
+
+    @app.post("/v1/tenants/{tenant_id}/suspension")
+    def suspend(
+        tenant_id: str, enabled: bool = True, current: Actor = Depends(actor)
+    ) -> dict[str, bool]:
+        control.suspend_tenant(tenant_id, current, enabled)
+        return {"suspended": enabled}
 
     @app.post("/v1/execution/grants")
     def issue_grant(body: GrantRequest, current: Actor = Depends(actor)) -> dict[str, Any]:

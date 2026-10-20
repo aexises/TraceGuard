@@ -85,6 +85,9 @@ class ActionRequest(PublicModel):
 
     @model_validator(mode="after")
     def validate_http_target(self) -> ActionRequest:
+        from traceguard.limits import validate_json
+
+        validate_json(self.arguments)
         if self.kind is ActionKind.HTTP:
             from traceguard.policy.network import destination
 
