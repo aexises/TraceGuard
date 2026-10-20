@@ -3,9 +3,10 @@ name = "traceguard-inspect-environment"
 version = "0.0.0"
 requires-python = "==3.11.*"
 dependencies = [
-  "inspect-ai==0.3.248",
+  "inspect-ai==0.3.281",
   "inspect-evals @ git+https://github.com/UKGovernmentBEIS/inspect_evals.git@99ef14c96efb4a4d36c344b313ca734074af88bf",
 ]
 
 [tool.uv]
 package = false
+constraint-dependencies = ["aiohttp>=3.14.5"]

@@ -1,4 +1,6 @@
 import json
+import re
+import tomllib
 from pathlib import Path
 
 import pytest
@@ -266,7 +268,20 @@ def test_every_environment_has_a_frozen_uv_lock():
     for environment in ("agentdyn", "inspect"):
         lock = Path("benchmarks/environments") / environment / "uv.lock"
         assert lock.is_file()
-        assert "revision = 3" in lock.read_text(encoding="utf-8")
+        data = tomllib.loads(lock.read_text(encoding="utf-8"))
+        assert data["version"] == 1
+        assert data["package"]
+        for package in data["package"]:
+            source = package["source"]
+            if "git" in source:
+                assert re.search(r"#[0-9a-f]{40}$", source["git"]), "mutable VCS dependency"
+            elif "registry" in source:
+                artifacts = [
+                    *package.get("wheels", []),
+                    *([package["sdist"]] if "sdist" in package else []),
+                ]
+                assert artifacts, "registry package must have locked distribution artifacts"
+                assert all(re.fullmatch(r"sha256:[0-9a-f]{64}", x["hash"]) for x in artifacts)
 
 
 def test_manifest_rejects_fixture_tampering(tmp_path):

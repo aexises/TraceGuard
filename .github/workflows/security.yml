@@ -1,0 +1,42 @@
+name: Security scans
+
+on:
+  pull_request:
+  push:
+  schedule:
+    - cron: '17 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  supply-chain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.11'
+      - run: python -m pip install uv==0.13.1
+      - run: uv sync --locked --extra dev --no-install-project
+      - run: uv sync --locked --extra dev --no-build-isolation --no-editable
+      - run: uv run --no-sync python -m benchmarks.release_checks --output artifacts/security
+      - name: Check native optional Inspect API without a model
+        run: |
+          uv sync --locked --all-extras --no-build-isolation --no-editable
+          uv run --no-sync python -m pytest tests/test_inspect_compatibility.py -q
+      - name: Check native AgentDyn dependency substitution without a model
+        run: |
+          uv sync --project benchmarks/environments/agentdyn --locked
+          uv run --project benchmarks/environments/agentdyn --locked --no-sync python -c "import agentdojo, vertexai, pydantic_ai; from agentdojo.agent_pipeline.llms import google_llm, openai_llm, anthropic_llm; from agentdojo.benchmark import get_suite; get_suite('v1.2', 'workspace')"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        if: always()
+        with:
+          name: security-scans
+          path: artifacts/security/
+          retention-days: 30

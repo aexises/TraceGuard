@@ -1,0 +1,61 @@
+name: Reviewed release candidate
+
+# No tag creation, package publication or automatic promotion. Owner must supply
+# authentic review/pilot/evaluation/license evidence before this job can pass.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  candidate:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.11'
+      - run: python -m pip install uv==0.13.1
+      - run: uv sync --locked --extra dev --no-install-project
+      - run: uv sync --locked --extra dev --no-build-isolation --no-editable
+      - name: Require source-bound human assurance
+        run: uv run --no-sync python -m benchmarks.release_assurance
+      - run: uv run --no-sync ruff check .
+      - run: uv run --no-sync ruff format --check .
+      - run: docker pull python@sha256:25976e9d34a0fab1f278cae931f34c8303d97bf0c0d7f85b6b4dcf641d7702a4
+      - run: uv run --no-sync python -m pytest -ra
+        env:
+          TRACEGUARD_RUN_DOCKER_TESTS: '1'
+      - run: uv run --no-sync python -m benchmarks.release_checks --output artifacts/security
+      - run: uv run --no-sync python -m build --no-isolation
+      - name: Require isolated execution conformance on candidate code
+        env:
+          PYTHON_IMAGE: python@sha256:25976e9d34a0fab1f278cae931f34c8303d97bf0c0d7f85b6b4dcf641d7702a4
+        run: |
+          docker build --build-arg PYTHON_IMAGE="$PYTHON_IMAGE" --tag traceguard:candidate .
+          uv run --no-sync python -m benchmarks.isolation_canary --image traceguard:candidate --output artifacts/isolation.json
+      - run: sha256sum dist/* > artifacts/SHA256SUMS
+      - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4 provenance
+        with:
+          subject-path: dist/*
+      - uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4 dependency SBOM
+        with:
+          subject-path: dist/*
+          sbom-path: artifacts/security/core-sbom.json
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: reviewed-release-candidate
+          path: |
+            dist/
+            artifacts/
