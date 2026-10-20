@@ -129,8 +129,8 @@ have landed. The four dependency manifest/lock corrections from #36 were backpor
 implementation. Earlier failed advisory checks remain historical failures; fresh CI must
 validate the updated heads. Application runtime code is unchanged by this integration.
 Linux CI exposed an additional race in the conformance fixture: the executor could be
-contacted before it began listening. A bounded listener probe now precedes each initial
-service launch and issuer restart. It sends no application request and never retries
+contacted before it began listening. A bounded listener probe now precedes application
+requests after each initial service launch and issuer restart. It sends no application request and never retries
 consequential dispatch. Delayed-start and unavailable-listener regressions verify this
 behavior. The correction was applied to #33 and propagated through #34–#36.
 
