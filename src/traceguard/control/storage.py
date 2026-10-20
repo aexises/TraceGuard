@@ -127,6 +127,7 @@ class SQLiteControlPlane(ControlPlane):
                 value["credential"],
                 CompiledAuthority(**value["compiled"]),
                 value["adapter_digest"],
+                value.get("execution_domain", ""),
             )
             for key, value in data["tasks"]
         }

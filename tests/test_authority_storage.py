@@ -2,6 +2,7 @@ import json
 import sqlite3
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 
 import pytest
 from test_execution_grants import actor, configured
@@ -26,6 +27,7 @@ def registration(task="new-task"):
         task_id=task,
         agent_subject="agent",
         service_key_id="agent-key",
+        execution_domain="test-approved-domain",
         authority={"enforcement_mode": "strict", "allowed_tools": ["calculator"]},
         adapter_digest="a" * 64,
         tool_schemas={"calculator": {"type": "object", "properties": {}}},
@@ -90,6 +92,45 @@ def test_valid_registration_remains_available_to_current_administrator(tmp_path)
     restored = SQLiteControlPlane(plane.database, KEY)
     assert restored._execution_tasks[("tenant", "new-task")].compiled.digest == digest
     assert restored.verify_audit_chain("tenant")
+
+
+def test_legacy_domain_requires_fenced_admin_reapproval_and_invalidates_grants(tmp_path):
+    plane = SQLiteControlPlane(tmp_path / "authority.db", KEY, initialize=True)
+    _, issuer, agent, factory, action, _ = configured(tmp_path, control=plane)
+    old_grant = issuer.issue(agent, action, "executor")
+    with plane.transaction():
+        key = ("tenant", "task")
+        plane._execution_tasks[key] = replace(plane._execution_tasks[key], execution_domain="")
+    restarted = ExecutionAuthority(SQLiteControlPlane(plane.database, KEY))
+    with pytest.raises(AuthorizationError, match="legacy"):
+        restarted.issue(agent, action, "executor")
+    with pytest.raises(ValueError, match="fenced"):
+        restarted.bind_legacy_domain(
+            "tenant",
+            actor("author", Role.ADMIN),
+            "task",
+            old_grant.execution_domain,
+            workers_fenced=False,
+        )
+    with pytest.raises(AuthorizationError):
+        restarted.bind_legacy_domain(
+            "tenant", agent, "task", old_grant.execution_domain, workers_fenced=True
+        )
+    restarted.bind_legacy_domain(
+        "tenant",
+        actor("author", Role.ADMIN),
+        "task",
+        old_grant.execution_domain,
+        workers_fenced=True,
+    )
+    with pytest.raises(AuthorizationError):
+        factory().execute(agent, action, old_grant)
+    new_grant = restarted.issue(agent, action, "executor")
+    assert factory().execute(agent, action, new_grant)["status"] == "succeeded"
+    with pytest.raises(ValueError, match="immutable"):
+        restarted.bind_legacy_domain(
+            "tenant", actor("author", Role.ADMIN), "task", "wrong-domain", workers_fenced=True
+        )
 
 
 def test_restart_preserves_registered_authority_grants_audit_and_revocation(tmp_path):

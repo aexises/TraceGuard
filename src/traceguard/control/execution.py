@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 
@@ -42,6 +42,7 @@ class RegisteredTask:
     credential: str
     compiled: CompiledAuthority
     adapter_digest: str
+    execution_domain: str
 
 
 class ExecutionAuthority:
@@ -86,6 +87,7 @@ class ExecutionAuthority:
                 registration.service_key_id,
                 compiled,
                 registration.adapter_digest,
+                registration.execution_domain,
             )
             self.control._append_audit(
                 tenant_id,
@@ -105,6 +107,8 @@ class ExecutionAuthority:
             task.credential,
         ):
             raise AuthorizationError("task is not registered for this principal and credential")
+        if not task.execution_domain:
+            raise AuthorizationError("legacy task requires fenced execution-domain approval")
         call = ToolCall(
             task_id=action.task_id,
             step_id=0,
@@ -114,6 +118,33 @@ class ExecutionAuthority:
         if task.compiled.evaluate("", call, []).decision.value != "ALLOW":
             raise AuthorizationError("action exceeds the registered strict task grant")
         return task
+
+    def bind_legacy_domain(
+        self,
+        tenant_id: str,
+        actor: Actor,
+        task_id: str,
+        execution_domain: str,
+        *,
+        workers_fenced: bool,
+    ) -> None:
+        """Reapprove a preserved legacy task after its ledger has been migrated offline."""
+        if not workers_fenced or not execution_domain or len(execution_domain) > 128:
+            raise ValueError("fenced workers and an approved migrated ledger are required")
+        with self.control.transaction():
+            self.control._require(actor, Role.ADMIN, tenant_id)
+            task = self._tasks[(tenant_id, task_id)]
+            if task.execution_domain:
+                raise ValueError("existing task execution domains are immutable")
+            self._tasks[(tenant_id, task_id)] = replace(task, execution_domain=execution_domain)
+            # Old grants cannot establish an execution-domain binding.
+            self._issued.clear()
+            self.control._append_audit(
+                tenant_id,
+                "task.domain-approved",
+                actor.subject,
+                {"task_id": task_id, "execution_domain": execution_domain},
+            )
 
     def issue(
         self, actor: Actor, action: ActionRequest, audience: str, review_id: str | None = None
@@ -151,6 +182,7 @@ class ExecutionAuthority:
                 agent_subject=actor.subject,
                 service_key_id=actor.service_key_id or "",
                 audience=audience,
+                execution_domain=task.execution_domain,
                 action_digest=action_digest(action),
                 authority_digest=task.compiled.digest,
                 adapter_digest=task.adapter_digest,
@@ -204,5 +236,7 @@ class ExecutionAuthority:
                 tenant_ids={grant.tenant_id},
             )
             task = self._task(principal, action)
+            if task.execution_domain != grant.execution_domain:
+                raise AuthorizationError("execution domain differs from approved task")
             if task.compiled.digest != grant.authority_digest:
                 raise AuthorizationError("task authority changed")
