@@ -1,7 +1,8 @@
 # Corrective security implementation — 20 October 2026
 
-Nine stacked draft PRs implement the ten findings against the combined unmerged baseline
-`aa34af2f2f673e1473629a136ae11f474236db0c`. Nothing has been merged or released.
+Nine corrective PRs implement the ten findings against the combined unmerged baseline
+`aa34af2f2f673e1473629a136ae11f474236db0c`. They were initially delivered as drafts;
+GitHub's PR history records their subsequent ordered integration. No release is claimed.
 The original audit describes the old baseline; these results do not retroactively change it.
 Implementation and maintained regressions are complete for the narrowed supported surface.
 Independent review and supported-release approval remain outstanding.
@@ -121,11 +122,13 @@ grants, and reconcile provider effects. Never recreate a missing ledger to resum
 An accepted agent observation is separate from permission to release artifacts, model
 input or final answers. Unsupported strict adapters remain withheld.
 
-These drafts are stacked. Earlier heads retain old affected dependency locks; their red
-advisory checks must not be described as green or bypassed. Review and validate the
-aggregate candidate including #36 before preparing any merge; sequential merge policies
-may require propagating the dependency correction through prerequisite branches first.
-No merge is performed by this implementation.
+During ordered integration, the remaining PRs were detached from a native stack whose
+trunk was the already-merged executor branch. Each PR targets `main` when its predecessors
+have landed. The four dependency manifest/lock corrections from #36 were backported to
+#27 and merged forward through #28–#35, preserving existing commits and each corrective
+implementation. Earlier failed advisory checks remain historical failures; fresh CI must
+validate the updated heads. The final executable source is unchanged by this integration;
+the completion notes were updated to describe the corrected integration procedure.
 
 Supported release remains blocked on independent security review, pre-registered held-out
 and adaptive efficacy evidence, actual application pilots, owner license approval and

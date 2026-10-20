@@ -58,9 +58,11 @@ validation. The manual candidate signing workflow has not been executed.
 The original follow-up series covers #21 staging/strict mode, #22 durable effects,
 #23 persistent authority, #24 sandbox/data release, #25 isolated execution,
 #26 effect-grounded evaluation, and #27 release assurance. The prerequisites are now
-included in `main`. GitHub manages #27's base as part of the PR stack; its branch
-incorporates current `main` to resolve overlap without rewriting feature history.
-The subsequent corrective series #28–#36 remains separate. Merge status does not
+included in `main`. For ordered integration, #27 was retargeted to `main` after the
+remaining PRs were detached from a native stack rooted at the old executor branch.
+The subsequent corrective series #28–#36 preserves its individual changes, with the
+dependency correction propagated through its prerequisites before merging. GitHub's
+PR history records the merge status of each change. Merge status does not
 establish deployment, live-model efficacy or independent security review.
 
 Historical validation of the original stack on October 17: 464 tests passed with Docker
@@ -75,5 +77,5 @@ packages are outside registry advisory coverage and are recorded in the scan rep
 Fresh native AgentDyn installation, suite loading and provider imports passed without
 a model. The release-evidence command exited with a missing-evidence error as intended.
 These checks do not establish live-model efficacy or independent assurance.
-They are not current advisory evidence; the dependency correction in #36 must be
-included before treating the corrective candidate's security scans as applicable.
+They are not current advisory evidence; use fresh scans of the corrective candidate
+with the patched dependency locks introduced in #36 and backported for integration.
