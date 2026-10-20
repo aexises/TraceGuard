@@ -184,7 +184,7 @@ class ArtifactStore:
         directory = self.released / identity
         try:
             manifest = json.loads(read_confined(directory, COMMIT_MANIFEST, max_bytes=1_048_576))
-            validate_json(manifest)
+            validate_json(manifest, max_bytes=1_048_576, max_nodes=16_384, max_depth=32)
             if not isinstance(manifest, dict):
                 raise ValueError("invalid commit manifest")
             if (
@@ -276,6 +276,7 @@ class ArtifactStore:
                     )
                 ).hexdigest(),
             }
+            validate_json(commit, max_bytes=1_048_576, max_nodes=16_384, max_depth=32)
             write_confined(pending, COMMIT_MANIFEST, canonical(commit))
             for directory in sorted(
                 (path for path in pending.rglob("*") if path.is_dir()),
