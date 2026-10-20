@@ -11,7 +11,8 @@ credentials or create a process/network sandbox.
 1. Authenticated application administration registers an immutable task for one tenant,
    agent subject and service credential using `POST /v1/tasks/register?tenant_id=...`.
    Supply a strict TaskAuthority, exact tool schemas and the approved adapter release's
-   SHA-256 digest. Caller/model evidence cannot register its own task.
+   SHA-256 digest, plus `execution_domain` from the provisioned ledger's protected
+   deployment configuration. Caller/model evidence cannot register its own task.
 2. The agent submits a typed tool ActionRequest to `POST /v1/execution/grants` with its
    executor audience. The issuer checks both current tenant policy and the registered
    compiled grant. Evaluation alone returns a decision receipt, not an execution token.
@@ -20,7 +21,7 @@ credentials or create a process/network sandbox.
    policy, changed arguments, a different principal/task or missing strict authority.
    An approved review can issue one grant; reusing it cannot mint fresh grants.
 4. The credential-holding executor verifies the signature, principal, tenant/task,
-   canonical action, adapter release, audience, key and expiry. It must validate current
+   canonical action, adapter release, ledger domain, audience, key and expiry. It must validate current
    authority online through `POST /v1/execution/validate` using its separate EXECUTOR
    identity. No offline fallback is permitted for this path.
 5. `MediatedExecutor` atomically reserves the nonce, effect and budget in a private SQLite
@@ -38,7 +39,9 @@ the executor with its own authenticated Actor, a trusted pinned issuer public ke
 the deployed adapter artifact digest, a fresh online-validation callback and a narrow
 dispatch function. Use the same private durable ledger for all replicas sharing the same
 execution authority; the current SQLite implementation is a local deployment building
-block, not a distributed database service. A fresh ledger loses replay/budget history.
+block, not a distributed database service. See `ledger_lifecycle.md` for mandatory
+provisioning, expected-identity validation and offline migration. A missing ledger fails
+closed; never replace it with a new database as automatic recovery.
 
 The adapter digest must identify a verified deployed artifact; do not accept it from model
 output or compute it from an untrusted request. The executor's handlers, OS identity,
@@ -51,10 +54,10 @@ deployment before claiming the stronger profile.
 Grants expire within 60 seconds. Policy changes observed by pre-dispatch validation revoke
 old grants; revocation cannot undo an already dispatched effect or eliminate every race
 between remote authorization and a provider call. Application identity/revocation checks
-remain necessary at ingress. The development issuer stores policies, registered tasks,
-reviews, keys and issued grants in memory; restarting it fails closed and requires trusted
-re-registration. The executor ledger survives its own restart, but production issuer
-persistence, migrations, backups, key management and recovery workflows remain release gates.
+remain necessary at ingress. The base `ControlPlane` stores state in memory; use
+`SQLiteControlPlane` for the supported single-host durable issuer profile described in
+`authority_storage.md`. External key management, distributed fencing and independently
+validated operational recovery remain release gates.
 
 Delegated observation fields are refused by this execution issuer until an authenticated
 source adapter is supplied. This prevents unsigned source IDs from becoming authority.

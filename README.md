@@ -72,10 +72,15 @@ English verbs and model explanations cannot create permissions. For example:
 
 ```python
 from pathlib import Path
+from traceguard.ledger import ExecutionLedger
 from traceguard.security import SecuredTools
 from traceguard.tools.registry import default_registry
 from traceguard.types import TaskAuthority
 
+# Trusted deployment, once only: provision and persist the returned identity in
+# application configuration. Do not run provisioning during restart or request handling.
+# ledger_id = ExecutionLedger.provision(Path("private-state/effects.sqlite"))
+ledger_id = "<identity from trusted deployment configuration>"
 boundary = SecuredTools(
     default_registry(Path("."), Path("artifacts")),
     TaskAuthority(
@@ -85,9 +90,12 @@ boundary = SecuredTools(
     ),
     task_id="application-approved-task",
     ledger_path=Path("private-state/effects.sqlite"),
+    ledger_id=ledger_id,
 )
 # Supply model ToolCall proposals only to boundary.execute_call(...).
 ```
+
+See [ledger lifecycle](docs/ledger_lifecycle.md) before upgrading an existing deployment.
 
 The existing `TraceGuardRuntime`/ablation interfaces preserve explicitly labelled
 research heuristics for historical experiments; they are not the strict product entry

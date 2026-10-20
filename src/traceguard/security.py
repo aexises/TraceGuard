@@ -23,6 +23,7 @@ class SecuredTools(TraceGuardRuntime):
         *,
         task_id: str,
         ledger_path: Path | None = None,
+        ledger_id: str | None = None,
         release_gate: ReleaseGate | None = None,
         model_input_label: str = "unclassified",
         supervisor: Supervisor | None = None,
@@ -44,6 +45,8 @@ class SecuredTools(TraceGuardRuntime):
         effects = set(strict.allowed_tools or []) - set(effect_registry()["read"])
         if effects and ledger_path is None:
             raise ValueError("strict side effects require a private durable ledger_path")
+        if ledger_path is not None and ledger_id is None:
+            raise ValueError("trusted ledger_id is required with ledger_path")
         super().__init__(
             tools,
             SafeguardConfig(deterministic_policy=True, llm_supervisor=supervisor is not None),
@@ -51,7 +54,11 @@ class SecuredTools(TraceGuardRuntime):
             supervisor=supervisor,
             sandbox=sandbox,
             task_authority=strict,
-            effect_ledger=ExecutionLedger(ledger_path) if ledger_path is not None else None,
+            effect_ledger=(
+                ExecutionLedger(ledger_path, expected_store_id=ledger_id)
+                if ledger_path is not None
+                else None
+            ),
             bound_task_id=task_id,
         )
 

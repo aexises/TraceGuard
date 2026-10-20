@@ -2,6 +2,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
+from traceguard.ledger import ExecutionLedger
 from traceguard.security import SecuredTools
 from traceguard.tools.registry import default_registry
 from traceguard.types import TaskAuthority, ToolCall
@@ -19,6 +20,7 @@ def setup(tmp_path, *, failing=False, repeatable=False):
         return effects[-1]
 
     registry.get("write_report").handler = handler
+    ledger_id = ExecutionLedger.provision(tmp_path / "state/effects.db")
     scope = TaskAuthority(
         allowed_tools=["write_report"],
         repeatable_tools=["write_report"] if repeatable else [],
@@ -28,7 +30,11 @@ def setup(tmp_path, *, failing=False, repeatable=False):
 
     def factory():
         return SecuredTools(
-            registry, scope, task_id="task", ledger_path=tmp_path / "state/effects.db"
+            registry,
+            scope,
+            task_id="task",
+            ledger_path=tmp_path / "state/effects.db",
+            ledger_id=ledger_id,
         )
 
     proposed = ToolCall(
@@ -46,7 +52,12 @@ def test_post_effect_failure_cannot_retry_even_after_restart_or_new_key(tmp_path
     assert (
         factory().execute_call("Write", proposed, []).trace.episode_outcome == "EXECUTION_UNKNOWN"
     )
-    new = proposed.model_copy(update={"call_id": "fresh-key"})
+    new = proposed.model_copy(
+        update={
+            "call_id": "fresh-key",
+            "arguments": {**proposed.arguments, "content": "Changed generated text"},
+        }
+    )
     assert factory().execute_call("Write", new, []).trace.episode_outcome == "ESCALATE"
     assert len(effects) == 1
 

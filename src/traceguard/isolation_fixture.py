@@ -23,6 +23,7 @@ from traceguard.control.models import (
 )
 from traceguard.control.storage import SQLiteControlPlane
 from traceguard.isolated import adapter_digest
+from traceguard.ledger import ExecutionLedger
 from traceguard.types import TaskAuthority
 
 
@@ -146,6 +147,8 @@ def prepare(root: Path, *, container_paths: bool = False) -> dict:
     plane.approve_policy("tenant", approver, draft.policy_id)
     issuer = ExecutionAuthority(plane)
     digest = adapter_digest()
+    executor_state = root / "executor-state"
+    execution_domain = ExecutionLedger.provision(executor_state / "effects.db")
     authority = TaskAuthority(
         enforcement_mode="strict",
         allowed_tools=["write_report"],
@@ -159,6 +162,7 @@ def prepare(root: Path, *, container_paths: bool = False) -> dict:
             task_id="approved-task",
             agent_subject=agent.subject,
             service_key_id=agent.service_key_id,
+            execution_domain=execution_domain,
             authority=authority.model_dump(mode="json"),
             adapter_digest=digest,
             tool_schemas={
@@ -187,6 +191,7 @@ def prepare(root: Path, *, container_paths: bool = False) -> dict:
             config.update(
                 identity=executor.model_dump(mode="json"),
                 adapter_digest=digest,
+                execution_domain=execution_domain,
                 issuer_url="https://authority:9443",
                 issuer_fingerprint=fingerprints["authority"],
                 issuer_public_key=issuer.public_key.hex(),

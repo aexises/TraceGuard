@@ -140,6 +140,7 @@ class ExecutorService:
             public_key=bytes.fromhex(config["issuer_public_key"]),
             key_id=config["issuer_key_id"],
             adapter_digest=config["adapter_digest"],
+            execution_domain=config["execution_domain"],
             validate_online=validate,
             dispatch=self.adapter.dispatch,
             reconcile_provider=self.adapter.reconcile,

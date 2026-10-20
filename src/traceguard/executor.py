@@ -38,6 +38,7 @@ class MediatedExecutor:
         public_key: bytes,
         key_id: str,
         adapter_digest: str,
+        execution_domain: str,
         validate_online: Callable[[Actor, ActionRequest, ExecutionGrant], None],
         dispatch: Callable[[ActionRequest], str],
         reconcile_provider: Callable[[dict, str], ProviderReceipt] | None = None,
@@ -49,10 +50,12 @@ class MediatedExecutor:
         self.adapter_digest = adapter_digest
         self.validate_online, self.dispatch = validate_online, dispatch
         self.reconcile_provider = reconcile_provider
-        self.ledger = ExecutionLedger(database)
+        self.ledger = ExecutionLedger(database, expected_store_id=execution_domain)
         self.database = self.ledger.database
 
-    def reconcile(self, operator: Actor, nonce: str, reference: str) -> dict:
+    def reconcile(
+        self, operator: Actor, nonce: str, reference: str, *, pending_worker_fenced: bool = False
+    ) -> dict:
         """Resolve through a trusted provider lookup, never an agent status claim."""
         record = self.ledger.lookup(nonce)
         if (
@@ -80,6 +83,7 @@ class MediatedExecutor:
             result=result,
             actor=operator.subject,
             provider_reference=reference,
+            pending_worker_fenced=pending_worker_fenced,
         )
 
     def execute(self, principal: Actor, action: ActionRequest, grant: ExecutionGrant) -> dict:
@@ -102,6 +106,7 @@ class MediatedExecutor:
             or grant.audience != self.identity.subject
             or grant.key_id != self.key_id
             or grant.adapter_digest != self.adapter_digest
+            or grant.execution_domain != self.ledger.store_id
             or grant.expires_at.tzinfo is None
             or grant.expires_at <= datetime.now(UTC)
             or grant.action_digest != action_digest(action)

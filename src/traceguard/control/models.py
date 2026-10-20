@@ -229,6 +229,7 @@ class ExecutionGrant(PublicModel):
     agent_subject: str
     service_key_id: str
     audience: str
+    execution_domain: str = Field(min_length=1, max_length=128)
     action_digest: str
     authority_digest: str
     adapter_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -247,6 +248,7 @@ class TaskRegistration(PublicModel):
     task_id: str = Field(min_length=1, max_length=256)
     agent_subject: str = Field(min_length=1, max_length=256)
     service_key_id: str = Field(min_length=1, max_length=256)
+    execution_domain: str = Field(min_length=1, max_length=128)
     authority: dict[str, Any]
     tool_schemas: dict[str, dict[str, Any]]
     adapter_digest: str = Field(pattern=r"^[0-9a-f]{64}$")

@@ -99,6 +99,9 @@ def test_compiled_grant_is_immutable_snapshot():
 
 
 def test_strict_runtime_preserves_benign_generated_report_utility(tmp_path):
+    from traceguard.ledger import ExecutionLedger
+
+    ledger_id = ExecutionLedger.provision(tmp_path / "state" / "effects.sqlite")
     boundary = SecuredTools(
         default_registry(tmp_path, tmp_path / "artifacts"),
         TaskAuthority(
@@ -108,6 +111,7 @@ def test_strict_runtime_preserves_benign_generated_report_utility(tmp_path):
         ),
         task_id="t",
         ledger_path=tmp_path / "state" / "effects.sqlite",
+        ledger_id=ledger_id,
     )
     proposed = ToolCall(
         task_id="t",

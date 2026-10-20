@@ -89,6 +89,7 @@ def test_http_grant_lifecycle_checks_roles_and_exact_action():
         "task_id": "task",
         "agent_subject": "agent",
         "service_key_id": "agent-key",
+        "execution_domain": "approved-deployment-ledger-id",
         "adapter_digest": "a" * 64,
         "authority": authority.model_dump(mode="json"),
         "tool_schemas": {

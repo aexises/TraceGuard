@@ -21,8 +21,10 @@ For a genuinely unguarded ablation select research scope explicitly. `mode="none
 with strict scope is rejected. This changes strict ablation semantics intentionally.
 
 Migration: `SecuredTools` now requires a trusted `task_id`; side-effect grants additionally
-require `ledger_path`. Reuse that ledger across instances and restarts. A new ledger or
-newly approved authority is a new authorization domain, never an agent-controlled reset.
+require `ledger_path` and the expected `ledger_id` from trusted deployment configuration.
+Provision once, then reopen only that identified store across instances and restarts.
+See `ledger_lifecycle.md` for fenced migration and recovery; changing authority or credentials
+does not clear an unresolved task hold or budget in that domain.
 Errors after dispatch are `EXECUTION_UNKNOWN`, retain reservations and stop the task.
 Even repeatable tools cannot blindly repeat an uncertain effect. Embedded receipts redact
 recognized credentials; comprehensive data-release controls are a separate boundary.

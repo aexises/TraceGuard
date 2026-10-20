@@ -17,6 +17,7 @@ from traceguard.control.models import (
 )
 from traceguard.control.service import AuthorizationError, ControlPlane
 from traceguard.executor import ExecutionUnknown, MediatedExecutor
+from traceguard.ledger import ExecutionLedger
 from traceguard.types import TaskAuthority
 
 
@@ -52,6 +53,7 @@ def configured(
         actor("executor", Role.EXECUTOR, "executor-key"),
     )
     issuer = ExecutionAuthority(control)
+    execution_domain = ExecutionLedger.provision(tmp_path / "ledger.sqlite")
     if tool == "send_money":
         fields = {"recipient": {"type": "string"}, "amount": {"type": "number"}}
         scope = TaskAuthority(
@@ -77,6 +79,7 @@ def configured(
             task_id="task",
             agent_subject="agent",
             service_key_id="agent-key",
+            execution_domain=execution_domain,
             authority=scope.model_dump(mode="json"),
             adapter_digest="a" * 64,
             tool_schemas={
@@ -103,6 +106,7 @@ def configured(
             key_id=issuer.key_id,
             adapter_digest="a" * 64,
             validate_online=issuer.validate,
+            execution_domain=execution_domain,
             dispatch=dispatch or handler,
         )
 
@@ -218,7 +222,7 @@ def test_parallel_distinct_payments_cannot_exceed_task_budget(tmp_path):
         start.wait()
         try:
             return executor.execute(agent, *pair)["status"]
-        except AuthorizationError:
+        except (AuthorizationError, ExecutionUnknown):
             return "denied"
 
     with ThreadPoolExecutor(max_workers=2) as pool:
