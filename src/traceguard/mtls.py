@@ -5,9 +5,11 @@ from __future__ import annotations
 import hashlib
 import http.client
 import json
+import socket
 import ssl
 import threading
 import time
+from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -90,50 +92,177 @@ class MTLSClient:
             connection.close()
 
 
+@dataclass
+class Ingress:
+    deadline: float
+    connection: socket.socket
+    actor: Actor | None = None
+    complete: bool = False
+    expired: bool = False
+    lock: threading.Lock = field(default_factory=threading.Lock)
+    timer: threading.Timer | None = None
+
+    def expire(self):
+        with self.lock:
+            if not self.complete:
+                self.expired = True
+                try:
+                    self.connection.shutdown(socket.SHUT_RDWR)
+                except OSError:
+                    pass
+
+    def finish(self):
+        with self.lock:
+            if self.expired or time.monotonic() >= self.deadline:
+                raise TimeoutError("absolute ingress deadline exceeded")
+            self.complete = True
+            self.timer.cancel()
+
+
+class HeaderBudgetReader:
+    def __init__(self, stream):
+        self.stream, self.bytes, self.lines = stream, 0, 0
+
+    def readline(self, limit=-1):
+        data = self.stream.readline(min(4097, limit) if limit >= 0 else 4097)
+        self.bytes += len(data)
+        self.lines += 1
+        if len(data) > 4096 or self.bytes > 32768 or self.lines > 65:
+            raise ValueError("HTTP request-line/header budget exceeded")
+        return data
+
+    def read(self, length):
+        return self.stream.read(length)
+
+    def close(self):
+        self.stream.close()
+
+
 class BoundaryServer(ThreadingHTTPServer):
     daemon_threads = True
     request_queue_size = 16
 
-    def __init__(self, address, *, context, identities: PeerIdentities, dispatch):
+    def __init__(
+        self,
+        address,
+        *,
+        context,
+        identities: PeerIdentities,
+        dispatch,
+        ingress_seconds: float = 5,
+        max_connections: int = 16,
+        max_peer_connections: int = 4,
+    ):
+        if not 0 < ingress_seconds <= 5 or not 1 <= max_peer_connections < max_connections <= 64:
+            raise ValueError("invalid bounded ingress configuration")
         self.context, self.identities, self.dispatch = context, identities, dispatch
-        self.slots = threading.BoundedSemaphore(16)
+        self.slots = threading.BoundedSemaphore(max_connections)
+        self.handshakes = threading.BoundedSemaphore(min(4, max_connections))
+        self.ingress_seconds, self.max_peer_connections = ingress_seconds, max_peer_connections
         self.rate_lock = threading.Lock()
         self.rates = {}
+        self.handshake_rates = {}
+        self.peers = {}
+        self.sessions = {}
         super().__init__(address, BoundaryHandler)
 
     def process_request(self, request, client_address):
         if not self.slots.acquire(blocking=False):
             request.close()
             return
+        with self.rate_lock:
+            self.sessions[request] = Ingress(time.monotonic() + self.ingress_seconds, request)
         try:
             super().process_request(request, client_address)
         except BaseException:
+            with self.rate_lock:
+                self.sessions.pop(request, None)
             self.slots.release()
             raise
 
     def process_request_thread(self, request, client_address):
+        secure, peer, acquired = None, None, False
+        with self.rate_lock:
+            ingress = self.sessions[request]
+        ingress.timer = threading.Timer(max(0, ingress.deadline - time.monotonic()), ingress.expire)
+        ingress.timer.daemon = True
+        ingress.timer.start()
         try:
-            request.settimeout(5)
-            with self.context.wrap_socket(request, server_side=True) as secure:
-                super().process_request_thread(secure, client_address)
-        except (ssl.SSLError, OSError):
-            request.close()
+            with self.rate_lock:
+                if not self._budget(client_address[0], self.handshake_rates, 120):
+                    return
+            if not self.handshakes.acquire(blocking=False):
+                return
+            acquired = True
+            request.settimeout(max(0.001, ingress.deadline - time.monotonic()))
+            secure = self.context.wrap_socket(
+                request, server_side=True, do_handshake_on_connect=False
+            )
+            with ingress.lock:
+                ingress.connection = secure
+                if ingress.expired or time.monotonic() >= ingress.deadline:
+                    raise TimeoutError("absolute ingress deadline exceeded")
+            secure.do_handshake()
+            self.handshakes.release()
+            acquired = False
+            # Exact registered identity is mandatory before any HTTP parsing.
+            actor = self.identities.resolve(secure.getpeercert(binary_form=True))
+            key = (actor.subject, actor.service_key_id)
+            with self.rate_lock:
+                if self.peers.get(key, 0) >= self.max_peer_connections or not self._budget(
+                    key, self.rates, 120
+                ):
+                    raise AuthorizationError("peer connection/request budget exhausted")
+                self.peers[key] = self.peers.get(key, 0) + 1
+                peer = key
+                ingress.actor = actor
+                self.sessions[secure] = ingress
+            self.finish_request(secure, client_address)
+        except AuthorizationError:
+            if secure is not None:
+                try:
+                    secure.sendall(
+                        b"HTTP/1.0 403 Forbidden\r\nContent-Length: 2\r\n"
+                        b"Connection: close\r\n\r\n{}"
+                    )
+                except OSError:
+                    pass
+        except (ssl.SSLError, OSError, ValueError, KeyError, TypeError):
+            pass
         finally:
+            ingress.timer.cancel()
+            if acquired:
+                self.handshakes.release()
+            if secure is not None:
+                secure.close()
+            request.close()
+            with self.rate_lock:
+                self.sessions.pop(request, None)
+                self.sessions.pop(secure, None)
+                if peer is not None:
+                    self.peers[peer] -= 1
+                    if not self.peers[peer]:
+                        del self.peers[peer]
             self.slots.release()
 
-    def admitted(self, actor: Actor) -> bool:
-        with self.rate_lock:
-            now = time.monotonic()
-            self.rates = {key: value for key, value in self.rates.items() if value[0] > now - 60}
-            key = (actor.subject, actor.service_key_id)
-            if key not in self.rates and len(self.rates) >= 1024:
-                return False
-            start, count = self.rates.get(key, (now, 0))
-            self.rates[key] = (start, count + 1)
-            return count < 120
+    @staticmethod
+    def _budget(key, rates, limit):
+        now = time.monotonic()
+        expired = [key for key, value in rates.items() if value[0] <= now - 60]
+        for expired_key in expired:
+            del rates[expired_key]
+        if key not in rates and len(rates) >= 1024:
+            return False
+        start, count = rates.get(key, (now, 0))
+        rates[key] = (start, count + 1)
+        return count < limit
 
 
 class BoundaryHandler(BaseHTTPRequestHandler):
+    def setup(self):
+        super().setup()
+        self.rfile = HeaderBudgetReader(self.rfile)
+
     def log_message(self, *_):
         pass
 
@@ -149,8 +278,6 @@ class BoundaryHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         try:
             actor = self.server.identities.resolve(self.connection.getpeercert(binary_form=True))
-            if not self.server.admitted(actor):
-                return self.reply(429, {"detail": "workload request budget exhausted"})
             lengths = self.headers.get_all("Content-Length") or []
             if (
                 len(lengths) != 1
@@ -166,6 +293,9 @@ class BoundaryHandler(BaseHTTPRequestHandler):
                 return self.reply(400, {"detail": "incomplete request"})
             payload = json.loads(raw)
             validate_json(payload, max_bytes=1_048_576, max_nodes=16_384, max_depth=32)
+            self.server.sessions[self.connection].finish()
+            # Registry revocation during slow ingress must take effect before dispatch.
+            actor = self.server.identities.resolve(self.connection.getpeercert(binary_form=True))
             result = self.server.dispatch(actor, self.path, payload)
             return self.reply(200, result)
         except AuthorizationError:

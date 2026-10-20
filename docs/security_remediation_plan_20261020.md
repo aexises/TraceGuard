@@ -369,5 +369,8 @@ the broader factory requires explicit research opt-in and makes no strict shell 
 C07 implements self-contained publication bundles, private staging, durable commit/recovery,
 authoritative public receipt reconciliation and fenced legacy quarantine. Fault injection
 covers writes, sync, rename, mirror failure, concurrent reject/release and corrupt bundles.
-C08–C09 remain open. Candidate-wide validation and independent review remain pending.
+C08 implements exact peer admission before HTTP parsing, a total ingress watchdog,
+header/body budgets, handshake and peer connection limits, cleanup and pre-dispatch
+registry revocation. Twelve disposable loopback transport/provider tests pass.
+C09 remains open. Candidate-wide validation and independent review remain pending.
 No merges or releases are authorized by this plan.
