@@ -98,6 +98,27 @@ def test_legacy_domain_requires_fenced_admin_reapproval_and_invalidates_grants(t
     plane = SQLiteControlPlane(tmp_path / "authority.db", KEY, initialize=True)
     _, issuer, agent, factory, action, _ = configured(tmp_path, control=plane)
     old_grant = issuer.issue(agent, action, "executor")
+    original_task = issuer._tasks[("tenant", "task")]
+    issuer.register(
+        "tenant",
+        actor("author", Role.ADMIN),
+        TaskRegistration(
+            task_id="unrelated-task",
+            agent_subject="agent",
+            service_key_id="agent-key",
+            execution_domain=old_grant.execution_domain,
+            authority=json.loads(original_task.compiled.scope_json),
+            tool_schemas=json.loads(original_task.compiled.schemas_json),
+            adapter_digest=original_task.adapter_digest,
+        ),
+    )
+    unrelated_action = action.model_copy(
+        update={
+            "task_id": "unrelated-task",
+            "idempotency_key": "unrelated-effect-key",
+        }
+    )
+    unrelated_grant = issuer.issue(agent, unrelated_action, "executor")
     with plane.transaction():
         key = ("tenant", "task")
         plane._execution_tasks[key] = replace(plane._execution_tasks[key], execution_domain="")
@@ -122,6 +143,9 @@ def test_legacy_domain_requires_fenced_admin_reapproval_and_invalidates_grants(t
         "task",
         old_grant.execution_domain,
         workers_fenced=True,
+    )
+    restarted.validate(
+        actor("executor", Role.EXECUTOR, "executor-key"), unrelated_action, unrelated_grant
     )
     with pytest.raises(AuthorizationError):
         factory().execute(agent, action, old_grant)
