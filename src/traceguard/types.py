@@ -203,11 +203,9 @@ class TraceEvent(StrictModel):
     timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
-class SafeguardConfig(StrictModel):
-    supervisor_mode: Literal["none", "deterministic", "llm", "deterministic_llm"] | None = None
-    defensive_prompt: bool = False
-    deterministic_policy: bool = False
+class EnforcementConfig(StrictModel):
+    """Strict enforcement cannot be disabled by an experiment configuration."""
+
+    deterministic_policy: Literal[True] = True
     llm_supervisor: bool = False
     post_run_reevaluation: bool = False
-    block_replanning: bool = True
-    max_block_replans: int = Field(default=2, ge=0, le=10)

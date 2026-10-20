@@ -1,9 +1,9 @@
 import pytest
 
-from benchmarks.datasets.gateway import SupervisionGateway
+from traceguard.integrations.gateway import SupervisionGateway
 from traceguard.policy.kernel import CompiledAuthority
 from traceguard.security import SecuredTools
-from traceguard.supervisor.agentdojo_pipeline import AgentDojoDeterministicSupervisor
+from traceguard.supervisor.deterministic import DeterministicSupervisor
 from traceguard.tools.registry import default_registry
 from traceguard.types import Decision, TaskAuthority, ToolCall
 
@@ -51,7 +51,7 @@ def test_strict_kernel_native_and_gateway_share_decisions(arguments, allowed):
     grant = scope()
     proposed = ToolCall(task_id="t", step_id=0, tool_name="send_email", arguments=arguments)
     compiled = CompiledAuthority.compile(grant, SCHEMAS)
-    native = AgentDojoDeterministicSupervisor()
+    native = DeterministicSupervisor()
     native.available_tools = SCHEMAS
     native.set_context(previous_calls=[], task_authority=grant)
     gateway = SupervisionGateway(
@@ -135,11 +135,3 @@ def test_strict_mode_does_not_authorize_empty_mutating_arguments():
         task_id="t", step_id=0, tool_name="update_user_info", arguments={"address": None}
     )
     assert check_authority("Update", proposed, [], grant).decision is Decision.ESCALATE
-
-
-def test_conformance_comparison_exposes_research_grammar_limit():
-    from benchmarks.policy_conformance import run_conformance
-
-    result = run_conformance()
-    assert result["strict_correct"] == result["total"]
-    assert result["research_correct"] < result["strict_correct"]

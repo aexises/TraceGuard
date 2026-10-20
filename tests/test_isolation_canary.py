@@ -5,7 +5,7 @@ import subprocess
 import sys
 import threading
 
-from benchmarks.isolation_canary import _READINESS_PROBE
+from traceguard.validation.isolation_canary import _READINESS_PROBE
 
 
 def test_readiness_waits_for_delayed_listener_without_sending_request():

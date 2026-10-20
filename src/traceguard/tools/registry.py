@@ -125,11 +125,11 @@ class ToolRegistry:
         return {name: tool.spec for name, tool in self._tools.items()}
 
     def restricted_to(self, names: list[str]) -> ToolRegistry:
-        """Return a registry containing exactly the tools exposed by a benchmark case."""
+        """Return a registry exposing exactly an application-selected tool set."""
         requested = set(names)
         unknown = requested - set(self._tools)
         if unknown:
-            raise ValueError(f"benchmark exposes unknown tools: {sorted(unknown)}")
+            raise ValueError(f"tool set includes unknown tools: {sorted(unknown)}")
         restricted = ToolRegistry()
         for name in names:
             restricted.register(self._tools[name])

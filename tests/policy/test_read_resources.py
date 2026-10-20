@@ -2,7 +2,7 @@ from copy import deepcopy
 
 import pytest
 
-from benchmarks.datasets.gateway import SupervisionGateway
+from traceguard.integrations.gateway import SupervisionGateway
 from traceguard.policy.kernel import CompiledAuthority
 from traceguard.policy.read_resources import bind_read_schema
 from traceguard.security import SecuredTools
@@ -93,7 +93,7 @@ def test_bound_native_schema_enforces_actual_selector_and_reviewed_defaults():
     pytest.importorskip("inspect_ai")
     from inspect_ai.tool import list_files, read_file
 
-    from benchmarks.datasets.inspect_integration import inspect_read_schema
+    from traceguard.integrations.inspect import inspect_read_schema
 
     schema = inspect_read_schema(read_file(timeout=30))
     scope = TaskAuthority(

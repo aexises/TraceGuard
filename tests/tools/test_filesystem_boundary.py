@@ -3,11 +3,11 @@ from unittest.mock import patch
 
 import pytest
 
+from traceguard._enforcement import GuardedExecution
 from traceguard.policy.engine import DeterministicPolicy, load_default_policy
-from traceguard.runtime import TraceGuardRuntime
 from traceguard.tools.filesystem import read_confined, write_confined
 from traceguard.tools.registry import default_registry
-from traceguard.types import SafeguardConfig, TaskAuthority, ToolCall
+from traceguard.types import EnforcementConfig, TaskAuthority, ToolCall
 
 
 @pytest.mark.parametrize("alias", ["symlink", "hardlink", "parent"])
@@ -59,16 +59,21 @@ def test_write_rejects_links_and_atomic_replacement_preserves_utility(tmp_path):
 
 def test_two_runtimes_do_not_share_authority_or_caller_mutations(tmp_path):
     shared = DeterministicPolicy(load_default_policy())
-    scope = TaskAuthority(allowed_tools=[])
+    scope = TaskAuthority(enforcement_mode="strict", allowed_tools=[])
     tools = default_registry(tmp_path, tmp_path / "artifacts")
-    first = TraceGuardRuntime(
-        tools, SafeguardConfig(deterministic_policy=True), policy=shared, task_authority=scope
-    )
-    TraceGuardRuntime(
+    first = GuardedExecution(
         tools,
-        SafeguardConfig(deterministic_policy=True),
+        EnforcementConfig(deterministic_policy=True),
         policy=shared,
-        task_authority=TaskAuthority(allowed_tools=["write_report"]),
+        task_authority=scope,
+        bound_task_id="t",
+    )
+    GuardedExecution(
+        tools,
+        EnforcementConfig(deterministic_policy=True),
+        policy=shared,
+        task_authority=TaskAuthority(enforcement_mode="strict", allowed_tools=["write_report"]),
+        bound_task_id="t",
     )
     scope.allowed_tools.append("write_report")
     result = first.execute_call(

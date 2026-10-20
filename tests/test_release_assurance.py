@@ -6,13 +6,13 @@ import tarfile
 
 import pytest
 
-from benchmarks.release_assurance import source_digest, validate
-from benchmarks.release_checks import extract_scanner, run, scan, stage_sources
+from traceguard.validation.release_assurance import source_digest, validate
+from traceguard.validation.release_checks import extract_scanner, run, scan, stage_sources
 
 
 @pytest.fixture
 def candidate(tmp_path):
-    for directory in ("src", "benchmarks", "react_agentdojo", "configs", ".github", "tests"):
+    for directory in ("src", "configs", ".github", "tests"):
         (tmp_path / directory).mkdir()
     for name in ("pyproject.toml", "uv.lock", "Dockerfile", ".dockerignore", "LICENSE"):
         (tmp_path / name).write_text("fixture " + name)

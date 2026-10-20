@@ -2,7 +2,7 @@ import hashlib
 
 import pytest
 
-from benchmarks.security_evaluation import analyze, freeze
+from traceguard.validation.security_evaluation import analyze, freeze
 
 
 def fixture(tmp_path):

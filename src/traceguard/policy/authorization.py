@@ -229,7 +229,8 @@ def check_authority(
         "list_files",
         "grep",
     }:
-        resource_fields = ()  # Preserve the explicitly labelled historical research ablation.
+        # Low-level compatibility does not establish reviewed strict read authority.
+        resource_fields = ()
     for field in sorted(
         set(resource_fields) | set(authority.resource_values.get(call.tool_name, {}))
     ):

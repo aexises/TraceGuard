@@ -30,8 +30,7 @@ tested through the actual embedded handler. Native sandbox execution is a separa
 
 Other effect-catalog reads (email, financial, web, calendar, channel, travel, and generic
 dataset stubs), and native memory/editor reads, have no reviewed strict resource mapping
-in this profile. They fail closed even if a name appears in an allowlist. Their historical
-research adapters remain research ablations, with no claim of equivalent strict enforcement.
+in this profile. They fail closed even if a name appears in an allowlist.
 Adding a supported adapter requires inspected implementation/schema, explicit resource
 and default semantics, a versioned mapping and positive/negative handler tests. Do not
 use a name-only or schema-only stub as a production strict adapter.

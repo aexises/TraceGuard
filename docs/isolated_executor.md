@@ -46,7 +46,7 @@ Run the full disposable deployment from the installed package/source checkout:
 docker build \
   --build-arg PYTHON_IMAGE=python@sha256:25976e9d34a0fab1f278cae931f34c8303d97bf0c0d7f85b6b4dcf641d7702a4 \
   --tag traceguard:local .
-python -m benchmarks.isolation_canary --image traceguard:local \
+python -m traceguard.validation.isolation_canary --image traceguard:local \
   --output artifacts/isolation-canary.json
 ```
 

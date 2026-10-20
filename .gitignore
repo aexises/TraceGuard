@@ -6,17 +6,5 @@ __pycache__/
 .coverage
 .env
 artifacts/
-.cache/traceguard-datasets/
-.venv-agentdyn/
-.venv-inspect/
 dist/
 *.egg-info/
-report/*.aux
-report/*.blg
-report/*.log
-report/*.out
-report/main.pdf
-SUBMISSION.md
-TODO.md
-proposal.md
-AGENTS.md

@@ -10,8 +10,6 @@ RUN python -c 'import os, re; image = os.environ.get("PYTHON_IMAGE", ""); assert
 WORKDIR /app
 COPY pyproject.toml uv.lock README.md ./
 COPY src ./src
-COPY benchmarks ./benchmarks
-COPY react_agentdojo ./react_agentdojo
 COPY configs ./configs
 # Bootstrap only uv outside the lock; all build and application dependencies use uv.lock.
 RUN pip install --no-cache-dir uv==0.13.1

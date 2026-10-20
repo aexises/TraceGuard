@@ -11,22 +11,21 @@ Use the locked development environment, install `uv==0.13.1`, and fetch full Git
 history. From the checkout run:
 
 ```sh
-python -m benchmarks.release_checks --output artifacts/security
-python -m benchmarks.release_assurance --digest-only
-python -m benchmarks.release_assurance
+python -m traceguard.validation.release_checks --output artifacts/security
+python -m traceguard.validation.release_assurance --digest-only
+python -m traceguard.validation.release_assurance
 ```
 
 The first command verifies the pinned Gitleaks archive SHA-256 before extraction,
 scans all fetched refs and non-ignored publication source with full redaction,
-exports hash-pinned core/all-extra and native Inspect/AgentDyn requirements, and runs pinned pip-audit with no
+exports hash-pinned core/all-extra requirements and runs pinned pip-audit with no
 dependency installation. Any scanner, integrity, size-limit, advisory or secret
 finding failure stops the check. Ignored local credentials are outside the source
 publication scan. No test/source blanket exemptions are supplied. `scan.json` is
 created only after every scan passes. JSON advisories and CycloneDX dependency SBOMs
 are retained. SBOMs describe resolved dependencies, not every file in an artifact.
-The two exact-commit upstream VCS benchmark packages have no registry advisory
-identity and are listed explicitly as unaudited source packages in `scan.json`;
-their registry dependencies are scanned. This is not an upstream source-code audit.
+The product has no native benchmark VCS environment. Registry advisory checks cover
+its distributed dependency profiles; they are not upstream source-code audits.
 
 Sources: [pip-audit](https://github.com/pypa/pip-audit),
 [Gitleaks](https://github.com/gitleaks/gitleaks), and
@@ -34,27 +33,6 @@ Sources: [pip-audit](https://github.com/pypa/pip-audit),
 Known-advisory scanning is time/platform bounded; run on each supported platform
 before promotion. Pinning the scanner version does not independently establish the
 trustworthiness of its own transitive tool dependencies.
-
-The October 17 scan identified cryptography's
-[PKCS7 advisory](https://github.com/pyca/cryptography/security/advisories/GHSA-g6cj-pr64-35w5)
-and affected optional dataset/HTTP/Inspect dependencies, including
-[fsspec ReferenceFileSystem](https://github.com/fsspec/filesystem_spec/security/advisories/GHSA-27vj-qcqg-25rc).
-The lock now uses patched versions. Inspect was upgraded because its previous
-fsspec upper bound prevented a compatible patched resolution. Presence in the lock
-does not establish exploit reachability in TraceGuard.
-
-The native AgentDyn environment explicitly excludes the obsolete `vertexai` PyPI
-alias and directly installs patched `google-cloud-aiplatform`, which supplies its
-Python module. It requires patched Pydantic AI as well. This intentional environment
-substitution is recorded in its `pyproject.toml`; it changes historical benchmark
-conditions. Reproduce efficacy on the new lock before making comparisons. Dependency
-metadata tools unaware of uv's exclusion policy may flag the omitted alias.
-Inspect uses bounded single-command `bash(timeout=30)` instead of `bash_session`:
-the upgraded interactive tool requires at least 210 seconds including its transport
-allowance. No permission or command timeout is silently expanded. API construction
-and all four native approval schemas are tested without invoking a model or shell.
-The rewrite bridge uses dataclass replacement with copied arguments, matching
-Inspect's native `ToolCall`; the previous Pydantic-only copy method did not work.
 
 ## Owner license decision
 
@@ -67,8 +45,8 @@ license approval. Until selection, `license-approval` evidence is missing.
 
 ## External review packet
 
-Give a reviewer this branch's source digest, exact commit, threat model, audit,
-PR stack, test logs, isolated-executor canary, dependency reports and SBOMs. Ask an
+Give a reviewer this branch's source digest, exact commit, threat model, maintained verification guide,
+test logs, isolated-executor canary, dependency reports and SBOMs. Ask an
 independent reviewer to reproduce bypass/replay/uncertainty/restart/rotation/data
 release tests and inspect the trust boundaries. Record reviewer identity and
 affiliation, scope/exclusions, methodology, findings, reproductions, fixes and
@@ -101,7 +79,7 @@ and two `pilot` records from distinct organizations. Duplicate reports/reference
 same-organization review, missing documents, changed hashes or source mismatches
 fail. Never add placeholder positive records to satisfy this gate.
 
-The digest binds source, tests, benchmark/configuration data, workflows and build
+The digest binds source, tests, configuration data, workflows and build
 inputs, excluding only the envelope itself, caches and compiled Python. Evidence
 reports and license are separately hash-bound. `reviewed_revision` is traceability
 metadata; digest equality establishes content binding, not the reviewer's identity.

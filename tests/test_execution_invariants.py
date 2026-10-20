@@ -1,16 +1,18 @@
 import pytest
 
-from traceguard.runtime import TraceGuardRuntime
+from traceguard._enforcement import GuardedExecution
+from traceguard.policy.engine import DeterministicPolicy, load_default_policy
 from traceguard.supervisor.base import enforce_allow_invariants
 from traceguard.tools.registry import default_registry
 from traceguard.types import (
     Decision,
+    EnforcementConfig,
     ExecutionTarget,
     GoalNecessity,
     GoalRelevance,
     RiskLevel,
-    SafeguardConfig,
     SupervisorOutput,
+    TaskAuthority,
     ToolCall,
 )
 
@@ -55,8 +57,18 @@ def test_simulated_write_does_not_invoke_handler_or_record_execution(tmp_path):
         raise AssertionError("simulation invoked a real handler")
 
     tools.get("write_report").handler = forbidden_handler
-    runtime = TraceGuardRuntime(
-        tools, SafeguardConfig(llm_supervisor=True), supervisor=Supervisor()
+    runtime = GuardedExecution(
+        tools,
+        EnforcementConfig(llm_supervisor=True),
+        supervisor=Supervisor(),
+        policy=DeterministicPolicy(load_default_policy()),
+        task_authority=TaskAuthority(
+            enforcement_mode="strict",
+            allowed_tools=["write_report"],
+            argument_values={"write_report": {"path": "artifacts/report.txt"}},
+            generated_fields={"write_report": ["content"]},
+        ),
+        bound_task_id="t",
     )
     result = runtime.execute_call(
         "Write",
@@ -86,11 +98,18 @@ def test_critical_container_allow_never_invokes_sandbox(tmp_path):
         def execute(self, _):
             raise AssertionError("critical risk reached execution")
 
-    runtime = TraceGuardRuntime(
+    runtime = GuardedExecution(
         default_registry(tmp_path, tmp_path / "artifacts"),
-        SafeguardConfig(llm_supervisor=True),
+        EnforcementConfig(llm_supervisor=True),
         supervisor=Supervisor(),
         sandbox=Sandbox(),
+        policy=DeterministicPolicy(load_default_policy()),
+        task_authority=TaskAuthority(
+            enforcement_mode="strict",
+            allowed_tools=["restricted_command"],
+            argument_values={"restricted_command": {"command": ["python", "-V"]}},
+        ),
+        bound_task_id="t",
     )
     result = runtime.execute_call(
         "Run",
