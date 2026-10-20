@@ -104,6 +104,8 @@ The narrow isolated report integration and its three-container conformance comma
 documented in [the isolated executor profile](docs/isolated_executor.md). Persistent
 single-host authority/recovery is described in [authority storage](docs/authority_storage.md),
 and [data release](docs/data_release.md) defines quarantine and explicit sink permissions.
+The [evaluation contract](docs/security_evaluation.md) separates actual effects from result
+withholding and documents frozen, trace-bound paired comparisons and remaining external work.
 
 ## How it works
 

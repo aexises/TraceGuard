@@ -198,6 +198,8 @@ class TraceEvent(StrictModel):
     token_usage: int = Field(default=0, ge=0)
     policy_version: str
     episode_outcome: str | None = None
+    execution_status: Literal["not_dispatched", "dispatched", "unknown", "replayed"] | None = None
+    result_released: bool | None = None
     timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
 
