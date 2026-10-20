@@ -26,7 +26,7 @@ approved isolated reports publish once; accepted container results replay and bl
 results remain withheld across restart. These tests establish specific checked behavior,
 not completeness against arbitrary attacks or superiority over another framework.
 
-## Candidate validation
+## Pre-integration candidate validation
 
 Executable candidate commit: `6b58a35be3d9c9210b76649a54f144a118afc00c`.
 Documentation-only delivery commits may follow; compare the governed source digest rather
@@ -83,7 +83,7 @@ artifacts/isolation-conformance-candidate-20261020.json
 artifacts/package-candidate-20261020.json
 ```
 
-## Reproducibility identifiers
+## Pre-integration reproducibility identifiers
 
 | Item | SHA-256 / pinned version |
 | --- | --- |
@@ -127,8 +127,22 @@ trunk was the already-merged executor branch. Each PR targets `main` when its pr
 have landed. The four dependency manifest/lock corrections from #36 were backported to
 #27 and merged forward through #28–#35, preserving existing commits and each corrective
 implementation. Earlier failed advisory checks remain historical failures; fresh CI must
-validate the updated heads. The final executable source is unchanged by this integration;
-the completion notes were updated to describe the corrected integration procedure.
+validate the updated heads. Application runtime code is unchanged by this integration.
+Linux CI exposed an additional race in the conformance fixture: the executor could be
+contacted before it began listening. A bounded listener probe now precedes each initial
+service launch and issuer restart. It sends no application request and never retries
+consequential dispatch. Delayed-start and unavailable-listener regressions verify this
+behavior. The correction was applied to #33 and propagated through #34–#36.
+
+The integrated candidate passed **542 tests with no skips** on Python 3.11, including
+the eleven Docker cases and two new readiness cases; Ruff, formatting and diff checks
+passed. The corrected three-container probe passed against a source-matching #34 image.
+Local logs are `/private/tmp/traceguard-ordered-integration-final-tests.log` and
+`/private/tmp/traceguard-pr34-readiness-canary.log`. These integration checks supplement
+the historical validation above. Their updated governed source digest and fresh scan
+revision are recorded separately in
+`artifacts/security-ordered-integration-final-20261020/scan.json`; CI publishes its own
+head-bound checks and scan artifacts.
 
 Supported release remains blocked on independent security review, pre-registered held-out
 and adaptive efficacy evidence, actual application pilots, owner license approval and
