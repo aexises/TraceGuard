@@ -806,7 +806,7 @@ class QwenSupervisor:
         repeated = duplicate_mutation(call, self.previous_calls, self.task_authority)
         deterministic = repeated or (
             self._deterministic_guard(user_task, call, observations)
-            if self.deterministic_enabled
+            if self.deterministic_enabled or self.task_authority.enforcement_mode == "strict"
             else self._output(
                 Decision.ALLOW,
                 RiskLevel.LOW,
@@ -823,7 +823,9 @@ class QwenSupervisor:
             self.last_evaluation_log = SupervisorEvaluationLog(
                 user_goal=user_task,
                 proposed_call=call.model_dump(mode="json"),
-                deterministic_enabled=self.deterministic_enabled,
+                deterministic_enabled=(
+                    self.deterministic_enabled or self.task_authority.enforcement_mode == "strict"
+                ),
                 deterministic_decision=deterministic.decision.value,
                 provider_called=False,
                 provider_response=None,
@@ -876,7 +878,9 @@ class QwenSupervisor:
             self.last_evaluation_log = SupervisorEvaluationLog(
                 user_goal=user_task,
                 proposed_call=call.model_dump(mode="json"),
-                deterministic_enabled=self.deterministic_enabled,
+                deterministic_enabled=(
+                    self.deterministic_enabled or self.task_authority.enforcement_mode == "strict"
+                ),
                 deterministic_decision=deterministic.decision.value,
                 provider_called=True,
                 provider_response=None,
@@ -915,7 +919,9 @@ class QwenSupervisor:
         self.last_evaluation_log = SupervisorEvaluationLog(
             user_goal=user_task,
             proposed_call=call.model_dump(mode="json"),
-            deterministic_enabled=self.deterministic_enabled,
+            deterministic_enabled=(
+                self.deterministic_enabled or self.task_authority.enforcement_mode == "strict"
+            ),
             deterministic_decision=deterministic.decision.value,
             provider_called=True,
             provider_response=response.model_dump(mode="json"),

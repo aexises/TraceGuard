@@ -9,6 +9,7 @@ from typing import Any
 from uuid import NAMESPACE_URL, uuid5
 
 from traceguard.policy.authorization import check_authority, duplicate_mutation, output
+from traceguard.policy.kernel import CompiledAuthority
 from traceguard.supervisor.base import enforce_allow_invariants
 from traceguard.supervisor.contracts import (
     SupervisorEvaluationLog,
@@ -189,8 +190,23 @@ def build_supervised_agentdojo_pipeline(
                         [*_executed_calls(messages[:-1]), *pending_calls],
                         task_authority or TaskAuthority(),
                     )
+                    strict = None
+                    if task_authority.enforcement_mode == "strict":
+                        strict = CompiledAuthority.compile(
+                            task_authority, self._tool_schemas(runtime.functions)
+                        ).evaluate(
+                            str(query),
+                            call,
+                            observations,
+                            [*_executed_calls(messages[:-1]), *pending_calls],
+                        )
+                        if strict.decision is Decision.ALLOW:
+                            strict = None
                     reserved = None
-                    if pending_calls and getattr(supervisor, "deterministic_enabled", False):
+                    if pending_calls and (
+                        getattr(supervisor, "deterministic_enabled", False)
+                        or task_authority.enforcement_mode == "strict"
+                    ):
                         reserved = check_authority(
                             str(query),
                             call,
@@ -199,9 +215,12 @@ def build_supervised_agentdojo_pipeline(
                             [*_executed_calls(messages[:-1]), *pending_calls],
                         )
                     decision = (
-                        repeated or reserved or supervisor.evaluate(str(query), call, observations)
+                        repeated
+                        or strict
+                        or reserved
+                        or supervisor.evaluate(str(query), call, observations)
                     )
-                except SupervisorSchemaError:
+                except (SupervisorSchemaError, ValueError):
                     decision = output(
                         Decision.ESCALATE, "invalid-tool-schema", "Tool validation failed."
                     )
@@ -228,7 +247,10 @@ def build_supervised_agentdojo_pipeline(
                             [*_executed_calls(messages[:-1]), *pending_calls],
                             task_authority or TaskAuthority(),
                         )
-                        if checked is None and getattr(supervisor, "deterministic_enabled", False):
+                        if checked is None and (
+                            getattr(supervisor, "deterministic_enabled", False)
+                            or task_authority.enforcement_mode == "strict"
+                        ):
                             checked = check_authority(
                                 str(query),
                                 replacement,
