@@ -7,6 +7,7 @@ from typing import Any
 from uuid import NAMESPACE_URL, uuid5
 
 from benchmarks.datasets.gateway import SupervisionGateway
+from traceguard.policy.authorization import tool_effect
 from traceguard.policy.read_resources import bind_read_schema
 from traceguard.types import Decision, Observation, TrustLabel
 
@@ -63,6 +64,7 @@ def traceguard_inspect_approver(
     gateway: SupervisionGateway,
     *,
     user_goal: str | Callable[[], str],
+    task_id: str = "inspect-eval",
 ):
     """Build an Inspect custom approver that delegates every call to TraceGuard."""
     try:
@@ -78,7 +80,7 @@ def traceguard_inspect_approver(
         goal = user_goal() if callable(user_goal) else user_goal
         observations = _inspect_history_observations(history)
         normalized, decision = gateway.evaluate(
-            task_id="inspect-eval",
+            task_id=task_id,
             step_id=step,
             user_goal=goal,
             tool_name=str(call.function),
@@ -92,6 +94,13 @@ def traceguard_inspect_approver(
             "traceguard_reason": decision.reason,
             "traceguard_call_id": normalized.call_id,
         }
+        if getattr(gateway, "compiled", None) is not None and tool_effect(normalized) != "read":
+            return Approval(
+                decision="reject",
+                explanation="Strict consequential tools require GuardedInspectExecutor dispatch; "
+                "an approval callback cannot observe or account for execution.",
+                metadata=metadata,
+            )
         if decision.decision is Decision.ALLOW:
             return Approval(decision="approve", explanation=decision.reason, metadata=metadata)
         if decision.decision is Decision.REWRITE and decision.rewritten_call is not None:
