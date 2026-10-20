@@ -90,6 +90,16 @@ class CompiledAuthority:
     schemas_json: str
     digest: str
 
+    def normalize_read(self, call: ToolCall) -> ToolCall:
+        from traceguard.policy.authorization import tool_effect
+        from traceguard.policy.read_resources import scoped_read_call
+
+        return (
+            scoped_read_call(call, json.loads(self.schemas_json)[call.tool_name])
+            if tool_effect(call) == "read"
+            else call.model_copy(deep=True)
+        )
+
     @classmethod
     def compile(
         cls, authority: TaskAuthority, schemas: dict[str, dict[str, Any]]
@@ -114,7 +124,8 @@ class CompiledAuthority:
         observations: list[Observation],
         previous_calls: Sequence[ToolCall] = (),
     ) -> SupervisorOutput:
-        from traceguard.policy.authorization import check_authority, output
+        from traceguard.policy.authorization import check_authority, output, tool_effect
+        from traceguard.policy.read_resources import scoped_read_call
         from traceguard.supervisor.contracts import (
             SupervisorSchemaError,
             _validate_arguments_against_json_schema,
@@ -128,6 +139,15 @@ class CompiledAuthority:
             _validate_arguments_against_json_schema(call.arguments, schemas[call.tool_name])
         except SupervisorSchemaError:
             return output(Decision.ESCALATE, "strict-invalid-schema", "Arguments fail tool schema.")
+        if tool_effect(call) == "read":
+            try:
+                call = scoped_read_call(call, schemas[call.tool_name])
+            except ValueError:
+                return output(
+                    Decision.ESCALATE,
+                    "strict-unreviewed-read-adapter",
+                    "Read adapter/schema needs a reviewed resource mapping.",
+                )
         denied = check_authority(
             goal,
             call,

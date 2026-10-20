@@ -223,8 +223,15 @@ def check_authority(
                 "argument-mismatch",
                 f"Argument {field} differs from the authorized source.",
             )
+    resource_fields = scoped_fields(call)
+    if authority.enforcement_mode != "strict" and call.tool_name in {
+        "read_file",
+        "list_files",
+        "grep",
+    }:
+        resource_fields = ()  # Preserve the explicitly labelled historical research ablation.
     for field in sorted(
-        set(scoped_fields(call)) | set(authority.resource_values.get(call.tool_name, {}))
+        set(resource_fields) | set(authority.resource_values.get(call.tool_name, {}))
     ):
         if field in authority.argument_values.get(
             call.tool_name, {}

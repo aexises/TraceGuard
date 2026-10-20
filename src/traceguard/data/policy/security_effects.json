@@ -1,10 +1,25 @@
 {
-  "version": "security-effects-v2",
+  "version": "security-effects-v3",
+  "read_adapters": {
+    "embedded-v1": {
+      "calculator": {"fields": ["expression"], "resources": []},
+      "read_file": {"fields": ["path"], "resources": ["path"]},
+      "search_documents": {"fields": ["query"], "resources": [], "implicit": ["corpus:documents"]}
+    },
+    "inspect-native-v1": {
+      "read_file": {"fields": ["file_path", "offset", "limit"], "resources": ["file_path"]},
+      "list_files": {"fields": ["path", "depth"], "resources": ["path"], "defaults": {"path": "."}},
+      "grep": {"fields": ["pattern", "path", "glob", "fixed_strings", "extended_regexp", "output_mode"], "resources": ["path"], "defaults": {"path": "."}}
+    }
+  },
   "email": {
     "recipient_fields": ["recipients", "to", "recipient", "cc", "bcc"],
     "object_fields": ["attachments"]
   },
   "object_fields": {
+    "read_file": ["path", "file", "file_path"],
+    "list_files": ["path"],
+    "grep": ["path"],
     "delete_email": ["email_id"],
     "delete_file": ["file_id"],
     "share_file": ["file_id"],

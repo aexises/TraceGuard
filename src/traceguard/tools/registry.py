@@ -17,6 +17,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from traceguard.policy.authorization import sensitive_path
+from traceguard.policy.read_resources import bind_read_schema
 from traceguard.tools.filesystem import read_confined, write_confined
 from traceguard.types import Observation, RiskLevel, ToolCall, TrustLabel
 
@@ -77,12 +78,15 @@ class ToolDefinition:
         handler: Callable[[ToolArguments], str],
         trust: TrustLabel,
         spec: ToolSpec,
+        *,
+        read_adapter_id: str | None = None,
     ) -> None:
         self.name = name
         self.arguments_model = arguments_model
         self.handler = handler
         self.trust = trust
         self.spec = spec
+        self.read_adapter_id = read_adapter_id
 
     def validate(self, arguments: dict[str, Any]) -> ToolArguments:
         return self.arguments_model.model_validate(arguments)
@@ -105,7 +109,16 @@ class ToolRegistry:
 
     def schemas(self) -> dict[str, dict[str, Any]]:
         return {
-            name: tool.arguments_model.model_json_schema() for name, tool in self._tools.items()
+            name: (
+                bind_read_schema(
+                    tool.arguments_model.model_json_schema(),
+                    adapter_id=tool.read_adapter_id,
+                    tool_name=name,
+                )
+                if tool.read_adapter_id is not None
+                else tool.arguments_model.model_json_schema()
+            )
+            for name, tool in self._tools.items()
         }
 
     def catalog(self) -> dict[str, ToolSpec]:
@@ -287,6 +300,7 @@ def default_registry(workspace: Path, artifacts: Path) -> ToolRegistry:
                 host_execution=False,
                 notes="Matches are untrusted and may embed indirect instructions.",
             ),
+            read_adapter_id="embedded-v1",
         )
     )
     registry.register(
@@ -305,6 +319,7 @@ def default_registry(workspace: Path, artifacts: Path) -> ToolRegistry:
                 host_execution=False,
                 notes=f"Hard-capped at {MAX_READ_BYTES} bytes; UTF-8 only.",
             ),
+            read_adapter_id="embedded-v1",
         )
     )
     registry.register(
@@ -323,6 +338,7 @@ def default_registry(workspace: Path, artifacts: Path) -> ToolRegistry:
                 host_execution=False,
                 notes="Rejects exponent/resource abuse and non-literal expressions.",
             ),
+            read_adapter_id="embedded-v1",
         )
     )
     registry.register(
