@@ -363,5 +363,8 @@ suite passes 494 tests with nine Docker cases skipped at this intermediate candi
 C05 implements guarded native Inspect dispatch/accounting and rejects strict consequential
 approval-only execution. Real native fixtures cover budgets, concurrent holds, native IDs,
 rewrites, cancellation, missing results and restarted accounting.
-C06–C09 remain open. Candidate-wide validation and independent review remain pending.
+C06 removes unsupported native shell/editor/memory/Python from the advertised strict
+standard-tool surface. The remaining read inventory has catalog-to-kernel conformance tests;
+the broader factory requires explicit research opt-in and makes no strict shell claim.
+C07–C09 remain open. Candidate-wide validation and independent review remain pending.
 No merges or releases are authorized by this plan.

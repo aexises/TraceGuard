@@ -92,9 +92,12 @@ observations, and seeded memory create/replace/insert/delete/rename operations. 
 sends append only to the current case's outbox. GitHub, shopping, payment, calendar, and
 harmful actions are virtual effects in disposable state.
 
-AgentHarm cases may use Inspect's maintained `read_file`, `list_files`, `grep`,
-`text_editor`, `python`, and `bash_session`; TraceGuard's Inspect approver supervises
-every call first. Terminal capability is enabled only for cases declaring it. Model
+The strict native factory exposes only reviewed `read_file`, `list_files` and `grep`
+resource mappings. Native bash, Python, text editor and memory are unavailable in the
+strict standard-tool profile. Explicit `profile="research"` exposes the broader maintained
+tool inventory, including bounded single-command `bash`, for labelled research only.
+Consequential native tools require the guarded solver route in `inspect_execution.md`;
+approval alone cannot account for dispatch. Terminal capability is enabled only for cases declaring it. Model
 providers run outside the container, and provider credentials are never included in the
 tool environment.
 

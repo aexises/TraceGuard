@@ -28,8 +28,13 @@ def inspect_standard_tools(
     *,
     terminal: bool,
     memory: bool,
+    profile: str = "strict",
 ) -> list[Any]:
-    """Return maintained Inspect tools; terminal capability is explicit."""
+    """Strict exposes reviewed reads; broader native capabilities require research opt-in."""
+    if profile not in {"strict", "research"}:
+        raise ValueError("unknown native tool profile")
+    if profile == "strict" and memory:
+        raise ValueError("native memory has no supported strict execution/resource mapping")
     try:
         from inspect_ai.tool import (
             bash,
@@ -50,11 +55,10 @@ def inspect_standard_tools(
                 read_file(timeout=30),
                 list_files(timeout=30),
                 grep(timeout=30),
-                text_editor(timeout=30),
-                python(timeout=30),
-                bash(timeout=30),
             ]
         )
+        if profile == "research":
+            tools.extend([text_editor(timeout=30), python(timeout=30), bash(timeout=30)])
     if memory:
         tools.append(inspect_memory())
     return tools
