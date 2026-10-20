@@ -11,9 +11,36 @@ descriptor-relative bounded copier. Profiles with unsupported runtime controls f
 `ArtifactStore` ingests accepted bytes into a private `quarantine/` directory and records
 file hashes. Post-run BLOCK_RESULT rejects the bundle. ACCEPT_RESULT does not publish it.
 An application-owned `ReleaseGate` must authorize its label and `artifact` sink; release
-rechecks every hash and file, then atomically publishes into `released/`. Rejection and
-release serialize with a private file lock. Consumers must mount/serve only `released/`;
-they must not receive the quarantine directory or the executor's OS credentials.
+rechecks every hash and file, then prepares files and `.traceguard-commit.json` together
+under private quarantine. It flushes the files/directories, publishes the complete bundle
+with one same-filesystem directory rename under the shared publisher lock, and flushes
+both parent directories before acknowledging durability. The supported profile requires
+POSIX local-filesystem rename/flock/fsync semantics and cooperating publishers; separate
+network filesystems, replicated stores and privileged host mutation are not covered.
+
+The public commit manifest is authoritative and binds identity, action digest when present,
+file hashes, label, sink and a digest of trusted release policy. The private manifest is a
+recoverable mirror. If updating the mirror fails after a durable publication, release
+returns the committed bundle; `manifest` reconstructs public truth. A failed directory
+flush/uncertain rename raises `PublicationUnknown`. Retry verifies the same committed
+bundle and syncs parents without redispatch. Reconciliation uses verified public commits
+and hashes, including after private mirror loss. Rejection after publication raises
+`AlreadyPublished`; withdrawal needs a separate authorization and is not implemented.
+
+Consumers must use `ArtifactStore.committed` to verify the complete file set and hashes
+before serving listed files; never enumerate and serve arbitrary release-directory bytes
+or expose the commit manifest as user content. Missing/corrupt commits and changed or
+extra files withhold consumption. Consumers must not receive quarantine or executor OS
+credentials. Only read-only consumers may access committed bundles; handler code and
+filesystem ownership remain trusted. The commit filename is reserved during ingestion.
+
+Migration: fence publishers and consumers together before upgrading. Call
+`quarantine_legacy_publications(workers_and_consumers_fenced=True)` to preserve unverifiable
+legacy release directories in private `legacy-publication-*` folders. These may contain
+previously exposed bytes; moving them cannot undo disclosure. Inspect and obtain new
+release approval rather than inventing old commit evidence. Upgrade consumer visibility
+rules before resuming service. A private mirror claiming release without a public commit
+is an uncertain state, not proof that nothing was published. No automatic downgrade is supported.
 
 The default supported formats are UTF-8 `.txt` and `.json`, served as inert data. Other
 formats require explicit application approval and an appropriate consumer. Release gates

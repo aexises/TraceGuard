@@ -366,5 +366,8 @@ rewrites, cancellation, missing results and restarted accounting.
 C06 removes unsupported native shell/editor/memory/Python from the advertised strict
 standard-tool surface. The remaining read inventory has catalog-to-kernel conformance tests;
 the broader factory requires explicit research opt-in and makes no strict shell claim.
-C07–C09 remain open. Candidate-wide validation and independent review remain pending.
+C07 implements self-contained publication bundles, private staging, durable commit/recovery,
+authoritative public receipt reconciliation and fenced legacy quarantine. Fault injection
+covers writes, sync, rename, mirror failure, concurrent reject/release and corrupt bundles.
+C08–C09 remain open. Candidate-wide validation and independent review remain pending.
 No merges or releases are authorized by this plan.
