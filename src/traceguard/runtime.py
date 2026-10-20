@@ -459,6 +459,7 @@ class TraceGuardRuntime:
             outputs.append(checked)
             if checked.decision in {Decision.BLOCK, Decision.ESCALATE}:
                 return outputs
+            call = self.compiled_authority.normalize_read(call)
         if self.config.deterministic_policy or self.config.llm_supervisor:
             repeated = duplicate_mutation(
                 call, self.executed_calls.get(call.task_id, []), self.task_authority

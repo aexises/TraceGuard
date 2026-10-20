@@ -7,7 +7,20 @@ from typing import Any
 from uuid import NAMESPACE_URL, uuid5
 
 from benchmarks.datasets.gateway import SupervisionGateway
+from traceguard.policy.read_resources import bind_read_schema
 from traceguard.types import Decision, Observation, TrustLabel
+
+
+def inspect_read_schema(tool: Any) -> dict:
+    """Bind only actual native ToolDefs whose inspected resource mapping is supported."""
+    from inspect_ai.tool import ToolDef
+
+    definition = ToolDef(tool)
+    return bind_read_schema(
+        definition.parameters.model_dump(mode="json", exclude_none=True),
+        adapter_id="inspect-native-v1",
+        tool_name=definition.name,
+    )
 
 
 def inspect_standard_tools(

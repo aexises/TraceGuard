@@ -116,6 +116,16 @@ class DeterministicPolicy:
         for resource in call.requested_resources:
             if resource == "artifact_output":
                 continue
+            if (
+                resource == "corpus:documents"
+                and call.tool_name == "search_documents"
+                and self.task_authority.enforcement_mode == "strict"
+                and resource
+                in self.task_authority.resource_values.get("search_documents", {}).get(
+                    "requested_resources", []
+                )
+            ):
+                continue
             if not resource.startswith("input:"):
                 return self._block("POLICY_UNKNOWN_RESOURCE", RiskLevel.HIGH)
             raw_path = resource.removeprefix("input:")

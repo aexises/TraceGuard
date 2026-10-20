@@ -357,5 +357,8 @@ C02 implements identified provisioning, domain-bound grants, durable task holds 
 fenced legacy migration; lifecycle and regression evidence accompanies its corrective PR.
 C03 implements separate durable result disposition, policy-bound replay and conservative
 legacy receipt migration. Its restart/fault regressions preserve withholding without redispatch.
-C04–C09 remain open. Candidate-wide validation and independent review remain pending.
+C04 implements schema-bound reviewed read mappings, explicit defaults/implicit resources
+and common kernel enforcement; unsupported strict read adapters are withheld. The full
+suite passes 494 tests with nine Docker cases skipped at this intermediate candidate.
+C05–C09 remain open. Candidate-wide validation and independent review remain pending.
 No merges or releases are authorized by this plan.

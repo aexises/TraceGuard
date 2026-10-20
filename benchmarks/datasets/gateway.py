@@ -80,6 +80,7 @@ class SupervisionGateway:
             if checked.decision is not Decision.ALLOW:
                 self.escalated = checked.decision is Decision.ESCALATE
                 return call, checked
+            call = self.compiled.normalize_read(call)
         if self.supervisor is None:
             return call, SupervisorOutput(
                 decision=Decision.ALLOW,
