@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation
@@ -138,7 +139,10 @@ class ExecutionAuthority:
                 raise ValueError("existing task execution domains are immutable")
             self._tasks[(tenant_id, task_id)] = replace(task, execution_domain=execution_domain)
             # Old grants cannot establish an execution-domain binding.
-            self._issued.clear()
+            for nonce, serialized in list(self._issued.items()):
+                issued = json.loads(serialized)
+                if (issued["tenant_id"], issued["task_id"]) == (tenant_id, task_id):
+                    del self._issued[nonce]
             self.control._append_audit(
                 tenant_id,
                 "task.domain-approved",

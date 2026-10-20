@@ -29,7 +29,7 @@ jobs:
       - name: Check native optional Inspect API without a model
         run: |
           uv sync --locked --all-extras --no-build-isolation --no-editable
-          uv run --no-sync python -m pytest tests/test_inspect_compatibility.py -q
+          uv run --no-sync python -m pytest tests/test_inspect_compatibility.py tests/test_inspect_execution.py tests/policy/test_read_resources.py -q
       - name: Check native AgentDyn dependency substitution without a model
         run: |
           uv sync --project benchmarks/environments/agentdyn --locked
