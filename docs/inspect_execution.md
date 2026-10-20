@@ -1,5 +1,12 @@
 # Inspect supported execution routes
 
+`inspect_standard_tools` defaults to the strict profile: only native `read_file`,
+`list_files` and `grep` when terminal capability is declared. Bash, Python, editor and
+memory are removed from that advertised strict surface. `memory=True` in strict mode
+raises a configuration error. Explicit `profile="research"` retains the broader native
+tools for labelled ablations; it is not a supported strict shell implementation.
+No command name is added to a generic allowlist to manufacture shell support.
+
 `traceguard_inspect_approver` is a pre-tool policy callback. In strict mode it rejects
 all consequential/unknown tools even when gateway evaluation permits the proposal.
 An approval callback cannot determine whether an operation actually ran, and native
