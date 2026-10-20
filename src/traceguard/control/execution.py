@@ -70,7 +70,6 @@ class ExecutionAuthority:
 
     def register(self, tenant_id: str, actor: Actor, registration: TaskRegistration) -> str:
         registration = registration.model_copy(deep=True)
-        self.control._require(actor, Role.ADMIN, tenant_id)
         scope = TaskAuthority.model_validate(registration.authority)
         if scope.delegated_fields:
             raise ValueError(
@@ -79,6 +78,7 @@ class ExecutionAuthority:
         compiled = CompiledAuthority.compile(scope, registration.tool_schemas)
         key = (tenant_id, registration.task_id)
         with self.control.transaction():
+            self.control._require(actor, Role.ADMIN, tenant_id)
             if key in self._tasks:
                 raise ValueError("task registration is immutable; create a newly approved task")
             self._tasks[key] = RegisteredTask(
