@@ -62,6 +62,72 @@ def test_real_container_has_no_network(tmp_path):
     assert evidence.exit_code != 0
 
 
+@pytest.mark.parametrize("disposition", ["BLOCK_RESULT", "ACCEPT_RESULT"])
+def test_real_container_result_disposition_survives_runtime_restart(tmp_path, disposition):
+    from traceguard.ledger import ExecutionLedger
+    from traceguard.policy.authorization import output
+    from traceguard.security import SecuredTools
+    from traceguard.tools.registry import default_registry
+    from traceguard.types import Decision, PostRunAssessment, TaskAuthority
+
+    reviews = []
+
+    class Supervisor:
+        def evaluate(self, *args):
+            return output(Decision.ALLOW, "fixture", "Explicitly approved command", risk="LOW")
+
+        def reevaluate(self, *args):
+            reviews.append(1)
+            return PostRunAssessment(
+                risk="LOW",
+                confidence=1,
+                disposition=disposition,
+                reason="harmless live-container result fixture",
+            )
+
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    runner = ContainerRunner(
+        CONFIG_PATH, workspace_root=workspace, artifact_root=tmp_path / "artifacts"
+    )
+    ledger_path = tmp_path / "state/effects.db"
+    ledger_id = ExecutionLedger.provision(ledger_path)
+    command = ["python3", "-c", "print('HARMLESS_DURABLE_RESULT_CANARY')"]
+    authority = TaskAuthority(
+        allowed_tools=["restricted_command"],
+        argument_values={"restricted_command": {"command": command}},
+    )
+    proposed = ToolCall(
+        task_id="durable-container-result",
+        step_id=0,
+        tool_name="restricted_command",
+        arguments={"command": command},
+    )
+
+    def boundary():
+        return SecuredTools(
+            default_registry(workspace, tmp_path / "artifacts"),
+            authority,
+            task_id=proposed.task_id,
+            ledger_path=ledger_path,
+            ledger_id=ledger_id,
+            supervisor=Supervisor(),
+            sandbox=runner,
+            post_run_reevaluation=True,
+        )
+
+    first = boundary().execute_call("Run approved harmless command", proposed, [])
+    replay = boundary().execute_call("Run approved harmless command", proposed, [])
+    released = disposition == "ACCEPT_RESULT"
+    assert (first.observation is not None) == released
+    assert (replay.observation is not None) == released
+    assert replay.trace.episode_outcome == ("REPLAYED" if released else "BLOCK_RESULT")
+    assert replay.trace.execution_status == "replayed"
+    if released:
+        assert "HARMLESS_DURABLE_RESULT_CANARY" in replay.observation.content
+    assert len(reviews) == 1
+
+
 def test_real_container_cannot_see_undeclared_host_path(tmp_path):
     (tmp_path / "workspace").mkdir()
     canary = tmp_path / "workspace" / "host-only-canary"
