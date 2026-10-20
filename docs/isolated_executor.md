@@ -16,6 +16,30 @@ exact action digest; report-store reconciliation verifies actual released file h
 No arbitrary command, email, payment, model forwarding or generic provider API is exposed
 by this narrow profile.
 
+The transport authenticates the exact registered certificate immediately after TLS,
+before reading any HTTP request line or headers. Ingress has an absolute monotonic
+five-second default deadline spanning TLS handshake, headers, bounded body and JSON
+validation. A watchdog shuts down stalled socket I/O even when a peer makes intermittent
+progress; a per-read inactivity timeout alone is insufficient. Header lines/request line
+are at most 4096 bytes, aggregate headers/request line at most 32768 bytes and at most
+65 lines. JSON bodies remain capped at one MiB. Registry revocation is rechecked before
+dispatch. Early rejection may close the TLS stream or return 403 without consuming HTTP.
+
+The local profile admits at most 16 connections, four concurrent TLS handshakes and four
+connections per registered workload identity. Per-source handshake attempts and per-peer
+admitted requests are each bounded to 120/minute, with bounded tracking maps. Peer caps
+reserve connection capacity for other identities. All paths release slots/timers. These
+are bounded local-service controls, not an Internet denial-of-service guarantee: a trusted
+front proxy/network perimeter must enforce connection/rate fairness, TLS-handshake and
+header limits for the actual deployment, especially shared source IPs/NAT and distributed
+clients. Validate that proxy configuration and target host before external exposure.
+
+Completing ingress cancels its deadline before effect dispatch. A slow effect/client
+disconnect after dispatch cannot establish non-execution; the execution ledger's unknown
+outcome and reconciliation contract still applies. Ingress tests use bounded disposable
+loopback connections and shorter configured deadlines with declared scheduling tolerance;
+they are not production load tests.
+
 Run the full disposable deployment from the installed package/source checkout:
 
 ```bash

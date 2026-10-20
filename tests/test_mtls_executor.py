@@ -64,7 +64,9 @@ def test_live_mtls_enforces_identity_grant_scope_replay_and_revocation(tmp_path)
         with pytest.raises(AuthorizationError):
             executor_client.request("/execute", {"action": changed["action"], "grant": grant})
         unknown = client(fixture, "unknown", "authority", issuer_server.server_port)
-        with pytest.raises(AuthorizationError):
+        # Admission precedes headers. Linux may close the unread request stream
+        # before the client receives the early 403; both outcomes deny dispatch.
+        with pytest.raises((AuthorizationError, OSError)):
             unknown.request("/issue", task)
         unpinned = MTLSClient(
             f"https://localhost:{issuer_server.server_port}", issuer_client.context, "0" * 64
