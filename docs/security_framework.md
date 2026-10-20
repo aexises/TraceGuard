@@ -47,6 +47,24 @@ already-public truth. Separate gates apply to model-provider inputs, final answe
 artifact publication. The supported text/JSON classifier needs trusted source/application
 labels; it is not general semantic DLP. See [data release](data_release.md).
 
+## Reference requirements
+
+These references define design and evaluation requirements, rather than evidence of
+TraceGuard's superiority or certification:
+
+| Reference | Requirement to assess |
+| --- | --- |
+| [OWASP Excessive Agency](https://genai.owasp.org/llmrisk/llm062025-excessive-agency/) | Minimal tools and privileges, explicit user scope and complete downstream mediation |
+| [OWASP SSRF guidance](https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html) | Structural destination checks, controlled resolution and redirect handling |
+| [NIST agent identity foundations](https://www.nist.gov/blogs/cybersecurity-insights/back-future-why-agentic-ai-needs-strong-identity-foundation) | Scoped identity, delegation, credential lifecycle and authenticated workloads |
+| [CaMeL](https://arxiv.org/abs/2503.18813), [implementation](https://github.com/google-research/camel-prompt-injection) | Capability control and separation of control/data flow; TraceGuard does not claim equivalent interpreter or information-flow guarantees |
+| [Progent](https://arxiv.org/abs/2504.11703), [implementation](https://github.com/sunblaze-ucb/progent) | Fine-grained programmable privileges, with matched utility/security evaluation before comparative claims |
+
+Use the [external outcome protocol](security_evaluation.md) to freeze compatible models,
+tasks, privileges, baseline commits, budgets and effect evaluators before measurement.
+Local regression fixtures establish specific checked behavior, not a matched external
+benchmark, independent efficacy result or general robustness guarantee.
+
 ## Limits and release criteria
 
 This framework does not supply arbitrary-provider transactional guarantees, general secret
