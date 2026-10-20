@@ -12,12 +12,33 @@ from uuid import uuid4
 
 from traceguard.isolation_fixture import prepare
 
+_READINESS_PROBE = """
+import socket
+import sys
+import time
+
+deadline = time.monotonic() + float(sys.argv[2])
+while True:
+    try:
+        with socket.create_connection(("127.0.0.1", int(sys.argv[1])), timeout=0.2):
+            break
+    except OSError as exc:
+        if time.monotonic() >= deadline:
+            raise TimeoutError("service listener readiness deadline exceeded") from exc
+        time.sleep(0.1)
+"""
+
 
 def docker(*args, timeout=60):
     result = subprocess.run(["docker", *args], capture_output=True, text=True, timeout=timeout)
     if result.returncode:
         raise RuntimeError(f"Docker operation failed: {args[0]}: {result.stderr[-4096:]}")
     return result.stdout.strip()
+
+
+def wait_for_listener(container: str) -> None:
+    # Probe before sending any action. Never retry a possibly dispatched effect.
+    docker("exec", container, "python", "-c", _READINESS_PROBE, "9443", "10", timeout=15)
 
 
 def run(image: str) -> dict:
@@ -75,6 +96,7 @@ def run(image: str) -> dict:
                     "--config",
                     "/config/config.json",
                 )
+                wait_for_listener(names[role])
             agent_command = [
                 "run",
                 "--rm",
@@ -90,6 +112,7 @@ def run(image: str) -> dict:
             ]
             first = json.loads(docker(*agent_command, timeout=60))
             docker("restart", names["authority"])
+            wait_for_listener(names["authority"])
             second = json.loads(docker(*agent_command, timeout=60))
             reports = list(
                 (root / "executor-state/artifacts/released").glob("*/reports/report.txt")
