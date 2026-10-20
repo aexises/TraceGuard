@@ -1,16 +1,95 @@
 import json
 import sqlite3
+import threading
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from test_execution_grants import actor, configured
 
 from traceguard.control.execution import ExecutionAuthority
-from traceguard.control.models import PolicyDraft, PolicyRule, ReviewResolution, Role, RuleMatch
+from traceguard.control.models import (
+    PolicyDraft,
+    PolicyRule,
+    ReviewResolution,
+    Role,
+    RuleMatch,
+    TaskRegistration,
+)
 from traceguard.control.service import AuthorizationError
 from traceguard.control.storage import CapacityError, SQLiteControlPlane
 
 KEY = b"test-only-authority-seed-" + b"x" * 32
+
+
+def registration(task="new-task"):
+    return TaskRegistration(
+        task_id=task,
+        agent_subject="agent",
+        service_key_id="agent-key",
+        authority={"enforcement_mode": "strict", "allowed_tools": ["calculator"]},
+        adapter_digest="a" * 64,
+        tool_schemas={"calculator": {"type": "object", "properties": {}}},
+    )
+
+
+@pytest.mark.parametrize("concurrent", [False, True])
+def test_registration_authorizes_after_loading_committed_revocation(tmp_path, concurrent):
+    path = tmp_path / "authority.db"
+    stale = SQLiteControlPlane(path, KEY, initialize=True)
+    revoker = SQLiteControlPlane(path, KEY)
+    admin = actor("old-admin", Role.ADMIN, "old-admin-key")
+    entered = threading.Event()
+
+    def register():
+        entered.set()
+        with pytest.raises(AuthorizationError, match="revoked"):
+            ExecutionAuthority(stale).register("tenant", admin, registration())
+
+    if concurrent:
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            with revoker.transaction():
+                revoker.revoke_credential("tenant", actor("operator", Role.ADMIN), "old-admin-key")
+                future = pool.submit(register)
+                assert entered.wait(2)
+            future.result(timeout=5)
+    else:
+        revoker.revoke_credential("tenant", actor("operator", Role.ADMIN), "old-admin-key")
+        register()
+    restored = SQLiteControlPlane(path, KEY)
+    assert not restored._execution_tasks
+    assert not any(e.event_type == "task.registered" for e in restored._audits["tenant"])
+
+
+@pytest.mark.parametrize("invalid", ["tenant", "role", "audit"])
+def test_registration_denial_and_failure_leave_no_task_or_audit(tmp_path, monkeypatch, invalid):
+    path = tmp_path / "authority.db"
+    plane = SQLiteControlPlane(path, KEY, initialize=True)
+    admin = actor("author", Role.ADMIN)
+    if invalid == "tenant":
+        admin.tenant_ids = {"different-tenant"}
+    elif invalid == "role":
+        admin.roles = {Role.AGENT}
+    else:
+
+        def fail(*args, **kwargs):
+            raise OSError("injected audit failure")
+
+        monkeypatch.setattr(plane, "_append_audit", fail)
+    with pytest.raises((AuthorizationError, OSError)):
+        ExecutionAuthority(plane).register("tenant", admin, registration())
+    restored = SQLiteControlPlane(path, KEY)
+    assert not restored._execution_tasks
+    assert not restored._audits
+
+
+def test_valid_registration_remains_available_to_current_administrator(tmp_path):
+    plane = SQLiteControlPlane(tmp_path / "authority.db", KEY, initialize=True)
+    digest = ExecutionAuthority(plane).register(
+        "tenant", actor("author", Role.ADMIN), registration()
+    )
+    restored = SQLiteControlPlane(plane.database, KEY)
+    assert restored._execution_tasks[("tenant", "new-task")].compiled.digest == digest
+    assert restored.verify_audit_chain("tenant")
 
 
 def test_restart_preserves_registered_authority_grants_audit_and_revocation(tmp_path):
