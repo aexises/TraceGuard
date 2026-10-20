@@ -45,7 +45,8 @@ class ReportAdapter:
             (action.tenant_id + "\0" + action.task_id + "\0" + action.idempotency_key).encode()
         ).hexdigest()
         directory = self.store.private / identity
-        if not directory.exists():
+        published = self.store.released / identity
+        if not directory.exists() and not published.exists():
             with tempfile.TemporaryDirectory(dir=self.state) as temporary:
                 source = Path(temporary).resolve()
                 path = action.arguments["path"]
@@ -53,8 +54,13 @@ class ReportAdapter:
                 self.store.ingest(
                     source, [path], artifact_id=identity, action_digest=action_digest(action)
                 )
-            self.store.release(identity, self.gate, label="public")
         manifest = self.store.manifest(identity)
+        if (
+            manifest.get("action_digest") == action_digest(action)
+            and manifest["status"] == "quarantined"
+        ):
+            self.store.release(identity, self.gate, label="public")
+            manifest = self.store.committed(identity)
         if (
             manifest.get("action_digest") != action_digest(action)
             or manifest["status"] != "released"
@@ -65,7 +71,7 @@ class ReportAdapter:
         )
 
     def reconcile(self, record: dict, reference: str) -> ProviderReceipt:
-        manifest = self.store.manifest(reference)
+        manifest = self.store.committed(reference, ensure_durable=True)
         if manifest["status"] != "released" or manifest.get("action_digest") != record["digest"]:
             raise AuthorizationError("no definitive matching provider receipt")
         for path, expected in manifest["files"].items():
