@@ -360,5 +360,8 @@ legacy receipt migration. Its restart/fault regressions preserve withholding wit
 C04 implements schema-bound reviewed read mappings, explicit defaults/implicit resources
 and common kernel enforcement; unsupported strict read adapters are withheld. The full
 suite passes 494 tests with nine Docker cases skipped at this intermediate candidate.
-C05–C09 remain open. Candidate-wide validation and independent review remain pending.
+C05 implements guarded native Inspect dispatch/accounting and rejects strict consequential
+approval-only execution. Real native fixtures cover budgets, concurrent holds, native IDs,
+rewrites, cancellation, missing results and restarted accounting.
+C06–C09 remain open. Candidate-wide validation and independent review remain pending.
 No merges or releases are authorized by this plan.
