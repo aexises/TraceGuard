@@ -248,7 +248,16 @@ class TraceGuardRuntime:
             except SandboxUnavailable:
                 if reserved:
                     self.effect_ledger.finish(effective_call.call_id, "unknown")
-                trace = self._trace(call, effective_call, outputs, plan, None, started, "ESCALATE")
+                trace = self._trace(
+                    call,
+                    effective_call,
+                    outputs,
+                    plan,
+                    None,
+                    started,
+                    "ESCALATE",
+                    execution_status="unknown",
+                )
                 return RuntimeResult(trace, None)
             self.executed_calls.setdefault(call.task_id, []).append(effective_call)
             observation = Observation(
@@ -267,6 +276,10 @@ class TraceGuardRuntime:
             if self.config.post_run_reevaluation and self.supervisor:
                 post_run = self.supervisor.reevaluate(user_task, effective_call, evidence)
             if post_run and post_run.disposition is not PostRunDisposition.ACCEPT_RESULT:
+                if post_run.disposition is PostRunDisposition.BLOCK_RESULT and hasattr(
+                    self.sandbox, "reject_artifacts"
+                ):
+                    self.sandbox.reject_artifacts(evidence)
                 outcome = (
                     "ESCALATE"
                     if post_run.disposition
@@ -403,6 +416,7 @@ class TraceGuardRuntime:
         observation: Observation | None,
         started: float,
         outcome: str,
+        execution_status: str | None = None,
     ) -> TraceEvent:
         if outcome == "ESCALATE":
             self.escalated_tasks.add(proposed.task_id)
@@ -425,6 +439,25 @@ class TraceGuardRuntime:
             token_usage=token_usage,
             policy_version=self.policy.version if self.policy else "disabled",
             episode_outcome=outcome,
+            execution_status=(
+                execution_status
+                or (
+                    "unknown"
+                    if outcome in {"EXECUTION_UNKNOWN", "TOOL_ERROR"}
+                    else "replayed"
+                    if outcome == "REPLAYED"
+                    else "dispatched"
+                    if outcome in {"EXECUTED", "EXECUTED_CONTAINER", "BLOCK_RESULT"}
+                    or (
+                        outcome == "ESCALATE"
+                        and plan is not None
+                        and plan.target is ExecutionTarget.CONTAINER
+                        and observation is not None
+                    )
+                    else "not_dispatched"
+                )
+            ),
+            result_released=outcome in {"EXECUTED", "EXECUTED_CONTAINER", "REPLAYED", "SIMULATED"},
         )
 
 

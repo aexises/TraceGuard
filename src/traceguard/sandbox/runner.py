@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import base64
+import json
 import os
 import re
 import selectors
-import shutil
 import stat
 import subprocess
 import tempfile
@@ -16,13 +17,14 @@ from pathlib import Path
 from uuid import uuid4
 
 from traceguard.policy.authorization import sensitive_path
+from traceguard.release_gate import ArtifactStore
 from traceguard.sandbox.config import (
     ENABLED_PROFILES,
     InputLimits,
     SandboxProfile,
     load_sandbox_configuration,
 )
-from traceguard.tools.filesystem import CopyBudget, copy_confined
+from traceguard.tools.filesystem import CopyBudget, copy_confined, write_confined
 from traceguard.types import ExecutionPlan, ExecutionTarget, SandboxEvidence
 
 _Executor = Callable[..., subprocess.CompletedProcess[str]]
@@ -131,7 +133,7 @@ class ContainerRunner:
         monitor: threading.Thread | None = None
 
         with tempfile.TemporaryDirectory(prefix="traceguard-sandbox-") as temporary:
-            staging_root = Path(temporary)
+            staging_root = Path(temporary).resolve()
             input_root = staging_root / "input"
             output_root = staging_root / "output"
             input_root.mkdir(mode=0o700)
@@ -141,10 +143,7 @@ class ContainerRunner:
             else:
                 self._stage_inputs(plan.declared_input_paths, input_root, profile.input_limits)
             if profile.output_mode == "allowlisted":
-                output_root.mkdir(mode=0o777)
-                # mkdir's mode is filtered by the host umask. The container's non-root
-                # UID needs write access to this bind mount, inside a private 0700 parent.
-                output_root.chmod(0o777)
+                output_root.mkdir(mode=0o700)
 
             docker_command = self._build_command(
                 container_name,
@@ -161,11 +160,18 @@ class ContainerRunner:
                 )
                 monitor.start()
             try:
+                if profile.output_mode == "allowlisted":
+                    launch = self._docker(docker_command, timeout=10, output_limit=4096)
+                    if launch.returncode != 0:
+                        raise SandboxUnavailable("quota-backed output container could not start")
+                    docker_command = ["docker", "exec", container_name, *command]
                 result = self._docker(
                     docker_command,
                     timeout=profile.limits.timeout_seconds,
                     output_limit=profile.limits.output_bytes,
                 )
+                if profile.output_mode == "allowlisted":
+                    self._collect_output(container_name, output_root, profile)
             except subprocess.TimeoutExpired as exc:
                 timed_out = True
                 timeout_stdout = exc.stdout or ""
@@ -202,6 +208,8 @@ class ContainerRunner:
             files_changed=files_changed,
             artifact_bytes=artifact_bytes,
             artifact_directory=artifact_directory,
+            artifact_id=container_name if artifact_directory is not None else None,
+            artifact_status="quarantined" if artifact_directory is not None else None,
             blocked_operations=blocked,
             duration_ms=(time.monotonic() - started) * 1000,
             peak_memory_bytes=resource_usage.get("peak_memory_bytes"),
@@ -268,15 +276,67 @@ class ContainerRunner:
                 ]
             )
         if profile.output_mode == "allowlisted":
+            uid, gid = self.config.container_user.split(":")
             docker_command.extend(
                 [
-                    "--mount",
-                    f"type=bind,src={output_root},dst=/traceguard/output",
+                    "--detach",
+                    "--tmpfs",
+                    "/traceguard/output:rw,noexec,nosuid,nodev,"
+                    f"size={profile.artifact_limits.max_total_bytes},"
+                    f"nr_inodes={profile.artifact_limits.max_inodes},uid={uid},gid={gid},mode=0700",
                     "--env",
                     "TRACEGUARD_OUTPUT=/traceguard/output",
                 ]
             )
+            # Keep tmpfs mounted for bounded export; forced cleanup terminates all children.
+            return [
+                *docker_command,
+                self.image,
+                "python3",
+                "-I",
+                "-c",
+                f"import time; time.sleep({profile.limits.timeout_seconds + 30})",
+            ]
         return [*docker_command, self.image, *command]
+
+    def _collect_output(self, container: str, output_root: Path, profile: SandboxProfile) -> None:
+        script = (Path(__file__).parents[1] / "data/sandbox/export.py").read_text()
+        limits = profile.artifact_limits
+        max_export = limits.max_total_bytes * 2 + limits.max_entries * 4096 + 65_536
+        result = self._docker(
+            [
+                "docker",
+                "exec",
+                container,
+                "python3",
+                "-I",
+                "-c",
+                script,
+                "/traceguard/output",
+                limits.model_dump_json(),
+            ],
+            timeout=10,
+            output_limit=max_export,
+        )
+        if result.returncode != 0 or len(result.stdout.encode()) > max_export:
+            raise EvidenceCollectionError("artifact export failed or exceeded its budget")
+        try:
+            files = json.loads(result.stdout)
+            if not isinstance(files, list) or len(files) > limits.max_files:
+                raise ValueError("invalid exported file count")
+            total, paths = 0, set()
+            for item in files:
+                relative = item["path"]
+                if relative in paths or len(Path(relative).parts) > limits.max_depth:
+                    raise ValueError("duplicate or excessively nested artifact")
+                paths.add(relative)
+                data = base64.b64decode(item["data"], validate=True)
+                total += len(data)
+                if len(data) > limits.max_file_bytes or total > limits.max_total_bytes:
+                    raise ValueError("exported artifact exceeds size budget")
+                write_confined(output_root, relative, data)
+        except (ValueError, KeyError, TypeError, OSError) as exc:
+            raise EvidenceCollectionError("untrusted artifact export is invalid") from exc
 
     def _stage_inputs(
         self, declared_paths: list[str], input_root: Path, limits: InputLimits | None = None
@@ -310,8 +370,12 @@ class ContainerRunner:
         changed: list[str] = []
         total = 0
         try:
-            paths = sorted(output_root.rglob("*"))
+            paths = output_root.rglob("*")
+            entries = 0
             for path in paths:
+                entries += 1
+                if entries > profile.artifact_limits.max_entries:
+                    raise EvidenceCollectionError("artifact entry limit exceeded")
                 metadata = path.lstat()
                 if stat.S_ISLNK(metadata.st_mode):
                     raise EvidenceCollectionError("artifact symbolic links are not allowed")
@@ -337,14 +401,16 @@ class ContainerRunner:
     ) -> str | None:
         if not files_changed:
             return None
-        destination = self.artifact_root / "sandbox" / container_name
         try:
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copytree(output_root, destination)
-        except OSError as exc:
-            shutil.rmtree(destination, ignore_errors=True)
+            store = ArtifactStore(self.artifact_root)
+            identity = store.ingest(output_root, files_changed, artifact_id=container_name)
+        except (OSError, ValueError) as exc:
             raise EvidenceCollectionError("artifact persistence failed") from exc
-        return str(destination)
+        return str(store.private / identity / "files")
+
+    def reject_artifacts(self, evidence: SandboxEvidence) -> None:
+        if evidence.artifact_id:
+            ArtifactStore(self.artifact_root).reject(evidence.artifact_id)
 
     def _cleanup_container(self, container_name: str) -> None:
         try:

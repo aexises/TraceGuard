@@ -17,8 +17,11 @@ ENABLED_PROFILES = {"isolated_compute", "readonly_input", "artifact_build"}
 
 class ArtifactLimits(StrictModel):
     max_files: int = Field(default=64, ge=1, le=4096)
-    max_total_bytes: int = Field(default=16_777_216, ge=1_024, le=1_073_741_824)
-    max_file_bytes: int = Field(default=8_388_608, ge=1_024, le=1_073_741_824)
+    max_total_bytes: int = Field(default=16_777_216, ge=1_024, le=16_777_216)
+    max_file_bytes: int = Field(default=8_388_608, ge=1_024, le=8_388_608)
+    max_entries: int = Field(default=256, ge=1, le=4096)
+    max_depth: int = Field(default=16, ge=1, le=32)
+    max_inodes: int = Field(default=512, ge=16, le=8192)
 
 
 class InputLimits(StrictModel):

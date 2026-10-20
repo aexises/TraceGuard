@@ -100,6 +100,13 @@ For action-bound grant issuance, durable execution reservations and human review
 [the execution contract](docs/execution_grants.md). The isolated-executor deployment
 profile still requires actual process, credential and egress isolation.
 
+The narrow isolated report integration and its three-container conformance command are
+documented in [the isolated executor profile](docs/isolated_executor.md). Persistent
+single-host authority/recovery is described in [authority storage](docs/authority_storage.md),
+and [data release](docs/data_release.md) defines quarantine and explicit sink permissions.
+The [evaluation contract](docs/security_evaluation.md) separates actual effects from result
+withholding and documents frozen, trace-bound paired comparisons and remaining external work.
+
 ## How it works
 
 For each proposed tool call, TraceGuard combines structured tool definitions,
