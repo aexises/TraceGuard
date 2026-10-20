@@ -53,12 +53,15 @@ External reviewers, application pilots, independent held-out results and the own
 distribution license decision remain pending. These are release blockers, not completed
 validation. The manual candidate signing workflow has not been executed.
 
-The seven follow-up PRs are stacked in order: #21 staging/strict mode, #22 durable
-effects, #23 persistent authority, #24 sandbox/data release, #25 isolated execution,
-#26 effect-grounded evaluation, then release assurance. They must be reviewed and
-merged in dependency order; draft publication is not deployment or independent review.
+The original follow-up series covers #21 staging/strict mode, #22 durable effects,
+#23 persistent authority, #24 sandbox/data release, #25 isolated execution,
+#26 effect-grounded evaluation, and #27 release assurance. The prerequisites are now
+included in `main`. GitHub manages #27's base as part of the PR stack; its branch
+incorporates current `main` to resolve overlap without rewriting feature history.
+The subsequent corrective series #28–#36 remains separate. Merge status does not
+establish deployment, live-model efficacy or independent security review.
 
-Local validation of the final stack on October 17: 464 tests passed with Docker
+Historical validation of the original stack on October 17: 464 tests passed with Docker
 canaries enabled and optional Inspect installed; Ruff and formatting passed; source
 and wheel distributions built; a fresh hash-locked Python 3.12 runtime installed the
 wheel and passed smoke/resource checks outside the checkout. The final locked image
@@ -70,3 +73,5 @@ packages are outside registry advisory coverage and are recorded in the scan rep
 Fresh native AgentDyn installation, suite loading and provider imports passed without
 a model. The release-evidence command exited with a missing-evidence error as intended.
 These checks do not establish live-model efficacy or independent assurance.
+They are not current advisory evidence; the dependency correction in #36 must be
+included before treating the corrective candidate's security scans as applicable.
