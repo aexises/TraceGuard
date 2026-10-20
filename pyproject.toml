@@ -47,6 +47,9 @@ packages = ["src/traceguard", "benchmarks", "react_agentdojo"]
 pythonpath = ["src", "."]
 testpaths = ["tests"]
 
+[tool.uv]
+constraint-dependencies = ["aiohttp>=3.14.5"]
+
 [tool.ruff]
 target-version = "py311"
 line-length = 100
