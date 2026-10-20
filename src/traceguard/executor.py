@@ -8,23 +8,25 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
-import sqlite3
 from collections.abc import Callable
-from contextlib import closing
+from dataclasses import dataclass
 from datetime import UTC, datetime
-from decimal import Decimal
 from pathlib import Path
 
 from traceguard.control.execution import payment_amount
 from traceguard.control.models import ActionRequest, Actor, ExecutionGrant, Role
 from traceguard.control.service import AuthorizationError, action_digest
 from traceguard.control.signing import canonical, verify
+from traceguard.ledger import ExecutionLedger, ExecutionUnknown
 from traceguard.supervisor.redaction import redact_value
 
 
-class ExecutionUnknown(RuntimeError):
-    """An effect may have happened; retry requires authoritative provider reconciliation."""
+@dataclass(frozen=True)
+class ProviderReceipt:
+    action_digest: str
+    reference: str
+    status: str
+    result: str | None = None
 
 
 class MediatedExecutor:
@@ -38,6 +40,7 @@ class MediatedExecutor:
         adapter_digest: str,
         validate_online: Callable[[Actor, ActionRequest, ExecutionGrant], None],
         dispatch: Callable[[ActionRequest], str],
+        reconcile_provider: Callable[[dict, str], ProviderReceipt] | None = None,
     ) -> None:
         if Role.EXECUTOR not in identity.roles or Role.AGENT in identity.roles:
             raise ValueError("executor requires a distinct executor identity")
@@ -45,25 +48,39 @@ class MediatedExecutor:
         self.public_key, self.key_id = public_key, key_id
         self.adapter_digest = adapter_digest
         self.validate_online, self.dispatch = validate_online, dispatch
-        self.database = database.absolute()
-        self.database.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        if self.database.is_symlink():
-            raise ValueError("execution ledger cannot be a symbolic link")
-        with closing(self._connection()) as connection:
-            connection.execute("PRAGMA journal_mode=WAL")
-            connection.execute("""CREATE TABLE IF NOT EXISTS executions (
-                nonce TEXT PRIMARY KEY, tenant TEXT NOT NULL, principal TEXT NOT NULL,
-                credential TEXT NOT NULL, task TEXT NOT NULL, idempotency_key TEXT NOT NULL,
-                digest TEXT NOT NULL, effect_digest TEXT NOT NULL, amount TEXT NOT NULL,
-                status TEXT NOT NULL, result TEXT,
-                UNIQUE(tenant, principal, credential, task, idempotency_key))""")
-        os.chmod(self.database, 0o600)
+        self.reconcile_provider = reconcile_provider
+        self.ledger = ExecutionLedger(database)
+        self.database = self.ledger.database
 
-    def _connection(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.database, timeout=5, isolation_level=None)
-        connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA synchronous=FULL")
-        return connection
+    def reconcile(self, operator: Actor, nonce: str, reference: str) -> dict:
+        """Resolve through a trusted provider lookup, never an agent status claim."""
+        record = self.ledger.lookup(nonce)
+        if (
+            Role.REVIEWER not in operator.roles
+            or Role.AGENT in operator.roles
+            or record["tenant"] not in operator.tenant_ids
+        ):
+            raise AuthorizationError("reconciliation requires a separate tenant reviewer")
+        if self.reconcile_provider is None:
+            raise AuthorizationError("authoritative provider reconciliation is not configured")
+        receipt = self.reconcile_provider(dict(record), reference)
+        if receipt.action_digest != record["digest"] or receipt.reference != reference:
+            raise AuthorizationError("provider receipt does not bind the reserved action")
+        result = receipt.result
+        if result is not None:
+            if len(result.encode()) > 1_048_576:
+                raise ValueError("provider receipt exceeds limit")
+            try:
+                result = json.dumps(redact_value(json.loads(result)), sort_keys=True)
+            except json.JSONDecodeError:
+                result = redact_value(result)
+        return self.ledger.reconcile(
+            nonce,
+            status=receipt.status,
+            result=result,
+            actor=operator.subject,
+            provider_reference=reference,
+        )
 
     def execute(self, principal: Actor, action: ActionRequest, grant: ExecutionGrant) -> dict:
         principal, action, grant = (
@@ -106,81 +123,22 @@ class MediatedExecutor:
                 {"tool": action.operation, "arguments": action.arguments, "target": action.target}
             )
         ).hexdigest()
-        with closing(self._connection()) as connection:
-            connection.execute("BEGIN IMMEDIATE")
-            existing = connection.execute(
-                (
-                    "SELECT * FROM executions WHERE nonce=? OR "
-                    "(tenant=? AND principal=? AND credential=? AND task=? AND idempotency_key=?)"
-                ),
-                (grant.nonce, *scope, action.idempotency_key),
-            ).fetchone()
-            if existing is not None:
-                connection.rollback()
-                if existing["digest"] != grant.action_digest:
-                    raise AuthorizationError("execution key is bound to a different effect")
-                if existing["status"] == "succeeded":
-                    return {
-                        "nonce": existing["nonce"],
-                        "status": "succeeded",
-                        "result": existing["result"],
-                        "replayed": True,
-                    }
-                if existing["status"] == "not_dispatched":
-                    raise AuthorizationError(
-                        "previous grant was rejected before dispatch; use a new key"
-                    )
-                raise ExecutionUnknown("an execution is pending or unknown; do not blindly retry")
-            if (
-                not grant.repeatable
-                and connection.execute(
-                    (
-                        "SELECT 1 FROM executions WHERE tenant=? AND principal=? "
-                        "AND credential=? AND task=? AND effect_digest=? "
-                        "AND status!='not_dispatched'"
-                    ),
-                    (*scope, effect_digest),
-                ).fetchone()
-            ):
-                connection.rollback()
-                raise AuthorizationError("identical effect already reserved under another key")
-            spent = sum(
-                (
-                    Decimal(row[0])
-                    for row in connection.execute(
-                        (
-                            "SELECT amount FROM executions WHERE tenant=? AND principal=? "
-                            "AND credential=? AND task=? AND status!='not_dispatched'"
-                        ),
-                        scope,
-                    )
-                ),
-                Decimal(0),
-            )
-            if grant.budget_limit is not None and spent + amount > Decimal(grant.budget_limit):
-                connection.rollback()
-                raise AuthorizationError("task budget is already spent or reserved")
-            connection.execute(
-                "INSERT INTO executions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (
-                    grant.nonce,
-                    *scope,
-                    action.idempotency_key,
-                    grant.action_digest,
-                    effect_digest,
-                    str(amount),
-                    "pending",
-                    None,
-                ),
-            )
-            connection.commit()
+        replay = self.ledger.reserve(
+            scope=scope,
+            nonce=grant.nonce,
+            idempotency_key=action.idempotency_key,
+            digest=grant.action_digest,
+            effect_digest=effect_digest,
+            amount=amount,
+            budget_limit=grant.budget_limit,
+            repeatable=grant.repeatable,
+        )
+        if replay is not None:
+            return replay
         try:
             self.validate_online(self.identity, action, grant)
         except BaseException:
-            with closing(self._connection()) as connection:
-                connection.execute(
-                    "UPDATE executions SET status='not_dispatched' WHERE nonce=?", (grant.nonce,)
-                )
+            self.ledger.finish(grant.nonce, "not_dispatched")
             raise
         try:
             result = self.dispatch(action)
@@ -192,18 +150,11 @@ class MediatedExecutor:
             except json.JSONDecodeError:
                 safe_result = redact_value(result)
         except BaseException as exc:
-            with closing(self._connection()) as connection:
-                connection.execute(
-                    "UPDATE executions SET status='unknown' WHERE nonce=?", (grant.nonce,)
-                )
+            self.ledger.finish(grant.nonce, "unknown")
             raise ExecutionUnknown(
                 "dispatch outcome is unknown; reconcile with the provider before retry"
             ) from exc
-        with closing(self._connection()) as connection:
-            connection.execute(
-                "UPDATE executions SET status='succeeded', result=? WHERE nonce=?",
-                (safe_result, grant.nonce),
-            )
+        self.ledger.finish(grant.nonce, "succeeded", safe_result)
         return {
             "nonce": grant.nonce,
             "status": "succeeded",
