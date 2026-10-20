@@ -27,11 +27,30 @@ after the old process is fenced; a caller-supplied status is never provider evid
 Resolving one record does not clear another unresolved record. Embedded applications
 must supply their own trusted reconciliation integration; automatic continuation is absent.
 
-For legacy v1 ledgers, stop consumers and all dispatchers first. On a disposable copy,
+Schema v3 separates execution status from result disposition. A successful effect may
+still have `pending_review`, `withheld` or `review_required` output. Those states withhold
+agent-visible replay and hold new effects. Only `accepted_for_agent` with stored bytes
+and the same result-policy binding permits replay. This is separate from provider,
+artifact and final-answer sink permission. A prior withhold cannot be overturned by
+another stochastic review during replay.
+
+`SecuredTools(post_run_reevaluation=True)` durably reviews container results before
+returning them. A review outage or interrupted commit retains withholding and never
+reruns the effect. Set `result_policy_version` from trusted application configuration
+and change it whenever the review prompt, provider/model, release interpretation or
+other decision semantics change. Configured deterministic policy, task authority and
+the review-enabled flag are also bound. A changed policy invalidates cached acceptance
+durably, even if the old version is subsequently restored. There is no automatic
+reconsideration of an already withheld or review-required record; trusted recovery must
+reconstruct evidence and obtain new authorization while admission stays fenced.
+
+For legacy v1/v2 ledgers, stop consumers and all dispatchers first. On a disposable copy,
 call `ExecutionLedger.migrate_legacy(path, backup=unused_backup_path,
 store_id=approved_identity, workers_fenced=True)`. It verifies an SQLite backup, validates
-the legacy schema and transactionally adds metadata while retaining all execution and
-reconciliation rows. The backup is mode 0600 and must be retained securely. An error
+the legacy schema and transactionally upgrades metadata while retaining all execution and
+reconciliation rows. V2 must retain its existing approved identity. All legacy successes
+become `review_required`; historical receipt bytes do not establish release permission.
+The backup is mode 0600 and must be retained securely. An error
 leaves admission stopped; the schema transaction rolls back. A partially created empty
 provisioning file is likewise an error requiring operator inspection, never automatic repair.
 

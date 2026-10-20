@@ -19,7 +19,7 @@ class ExecutionUnknown(RuntimeError):
 
 
 class ExecutionLedger:
-    SCHEMA = 2
+    SCHEMA = 3
 
     def __init__(self, database: Path, *, expected_store_id: str) -> None:
         self.database = database.absolute()
@@ -49,6 +49,8 @@ class ExecutionLedger:
                 credential TEXT NOT NULL, task TEXT NOT NULL, idempotency_key TEXT NOT NULL,
                 digest TEXT NOT NULL, effect_digest TEXT NOT NULL, amount TEXT NOT NULL,
                 status TEXT NOT NULL, result TEXT,
+                disposition TEXT NOT NULL DEFAULT 'review_required',
+                result_policy TEXT NOT NULL DEFAULT '',
                 UNIQUE(tenant, principal, credential, task, idempotency_key))""")
             connection.execute("""CREATE TABLE reconciliations (
                 nonce TEXT NOT NULL, actor TEXT NOT NULL, status TEXT NOT NULL,
@@ -71,7 +73,7 @@ class ExecutionLedger:
     def migrate_legacy(
         cls, database: Path, *, backup: Path, store_id: str, workers_fenced: bool
     ) -> None:
-        """Offline v1 migration. Operator must fence all old workers and retain the backup."""
+        """Offline v1/v2 migration; fence old workers and retain the verified backup."""
         if not workers_fenced or not store_id or len(store_id) > 128:
             raise ValueError("migration requires fenced workers and an approved store identity")
         cls._check_file(database)
@@ -87,7 +89,10 @@ class ExecutionLedger:
                 row[0]
                 for row in source.execute("SELECT name FROM sqlite_master WHERE type='table'")
             }
-            if tables != {"executions", "reconciliations"}:
+            if tables not in (
+                {"executions", "reconciliations"},
+                {"executions", "reconciliations", "ledger_metadata"},
+            ):
                 raise ValueError("not a supported legacy ledger; no migration performed")
             # Require the exact known schema before modifying the fenced source.
             columns = [row[1] for row in source.execute("PRAGMA table_info(executions)")]
@@ -105,7 +110,21 @@ class ExecutionLedger:
                 "result",
             ]:
                 raise ValueError("unsupported legacy execution schema")
-            cls._metadata(source, store_id)
+            if "ledger_metadata" in tables:
+                metadata = source.execute("SELECT schema,store_id FROM ledger_metadata").fetchall()
+                if metadata != [(2, store_id)]:
+                    raise ValueError("v2 migration requires its original approved identity")
+            source.execute(
+                "ALTER TABLE executions ADD COLUMN disposition "
+                "TEXT NOT NULL DEFAULT 'review_required'"
+            )
+            source.execute(
+                "ALTER TABLE executions ADD COLUMN result_policy TEXT NOT NULL DEFAULT ''"
+            )
+            if "ledger_metadata" in tables:
+                source.execute("UPDATE ledger_metadata SET schema=?", (cls.SCHEMA,))
+            else:
+                cls._metadata(source, store_id)
             source.commit()
 
     @staticmethod
@@ -153,6 +172,7 @@ class ExecutionLedger:
         amount: Decimal = Decimal(0),
         budget_limit: str | None = None,
         repeatable: bool = False,
+        result_policy: str = "",
     ) -> dict | None:
         with closing(self._connection()) as connection:
             connection.execute("BEGIN IMMEDIATE")
@@ -164,17 +184,29 @@ class ExecutionLedger:
                 (nonce, *scope, idempotency_key),
             ).fetchone()
             if existing is not None:
-                connection.rollback()
                 existing_scope = tuple(
                     existing[key] for key in ("tenant", "principal", "credential", "task")
                 )
                 if existing["digest"] != digest or existing_scope != scope:
                     raise AuthorizationError("execution key is bound to a different effect")
                 if existing["status"] == "succeeded":
+                    disposition = existing["disposition"]
+                    if disposition == "accepted_for_agent" and (
+                        existing["result_policy"] != result_policy or existing["result"] is None
+                    ):
+                        disposition = "review_required"
+                        connection.execute(
+                            "UPDATE executions SET disposition=? WHERE nonce=?",
+                            (disposition, existing["nonce"]),
+                        )
+                    connection.commit()
                     return {
                         "nonce": existing["nonce"],
                         "status": "succeeded",
-                        "result": existing["result"],
+                        "result": existing["result"]
+                        if disposition == "accepted_for_agent"
+                        else None,
+                        "disposition": disposition,
                         "replayed": True,
                     }
                 if existing["status"] == "not_dispatched":
@@ -184,7 +216,8 @@ class ExecutionLedger:
                 raise ExecutionUnknown("an execution is pending or unknown; do not blindly retry")
             if connection.execute(
                 "SELECT 1 FROM executions WHERE tenant=? AND task=? "
-                "AND status IN ('pending','unknown')",
+                "AND (status IN ('pending','unknown') OR "
+                "(status='succeeded' AND disposition!='accepted_for_agent'))",
                 (scope[0], scope[3]),
             ).fetchone():
                 raise ExecutionUnknown(
@@ -219,7 +252,7 @@ class ExecutionLedger:
                 connection.rollback()
                 raise AuthorizationError("task budget is already spent or reserved")
             connection.execute(
-                "INSERT INTO executions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO executions VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     nonce,
                     *scope,
@@ -229,20 +262,52 @@ class ExecutionLedger:
                     str(amount),
                     "pending",
                     None,
+                    "pending_review",
+                    result_policy,
                 ),
             )
             connection.commit()
 
-    def finish(self, nonce: str, status: str, result: str | None = None) -> None:
+    def finish(
+        self,
+        nonce: str,
+        status: str,
+        result: str | None = None,
+        *,
+        disposition: str = "review_required",
+    ) -> None:
         if status not in {"succeeded", "unknown", "not_dispatched"}:
             raise ValueError("invalid execution status")
+        if disposition not in {
+            "pending_review",
+            "accepted_for_agent",
+            "withheld",
+            "review_required",
+        }:
+            raise ValueError("invalid result disposition")
+        if disposition == "accepted_for_agent" and (status != "succeeded" or result is None):
+            raise ValueError("acceptance requires a succeeded execution and stored result")
         with closing(self._connection()) as connection:
             changed = connection.execute(
-                "UPDATE executions SET status=?, result=? WHERE nonce=? AND status='pending'",
-                (status, result, nonce),
+                "UPDATE executions SET status=?, result=?, disposition=? "
+                "WHERE nonce=? AND status='pending'",
+                (status, result, disposition, nonce),
             ).rowcount
             if changed != 1:
                 raise ExecutionUnknown("reservation changed or was lost before completion")
+
+    def decide_result(self, nonce: str, disposition: str, *, result_policy: str) -> None:
+        """Complete the first review only; withheld decisions cannot be silently reconsidered."""
+        if disposition not in {"accepted_for_agent", "withheld", "review_required"}:
+            raise ValueError("invalid result disposition")
+        with closing(self._connection()) as connection:
+            changed = connection.execute(
+                "UPDATE executions SET disposition=? WHERE nonce=? AND status='succeeded' "
+                "AND disposition='pending_review' AND result_policy=? AND result IS NOT NULL",
+                (disposition, nonce, result_policy),
+            ).rowcount
+            if changed != 1:
+                raise ExecutionUnknown("result review changed or requires authorized recovery")
 
     def lookup(self, nonce: str) -> dict:
         with closing(self._connection()) as connection:
@@ -260,9 +325,14 @@ class ExecutionLedger:
         actor: str,
         provider_reference: str,
         pending_worker_fenced: bool = False,
+        disposition: str = "review_required",
     ) -> dict:
         if status not in {"succeeded", "not_dispatched"} or not provider_reference:
             raise ValueError("reconciliation requires a definitive verified provider receipt")
+        if disposition not in {"accepted_for_agent", "withheld", "review_required"} or (
+            disposition == "accepted_for_agent" and (status != "succeeded" or result is None)
+        ):
+            raise ValueError("invalid reconciliation result disposition")
         with closing(self._connection()) as connection:
             connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
@@ -271,9 +341,9 @@ class ExecutionLedger:
             if row is not None and row[0] == "pending" and not pending_worker_fenced:
                 raise ValueError("fence the pending worker before reconciliation")
             changed = connection.execute(
-                "UPDATE executions SET status=?, result=? WHERE nonce=? "
+                "UPDATE executions SET status=?, result=?, disposition=? WHERE nonce=? "
                 "AND status IN ('unknown','pending')",
-                (status, result, nonce),
+                (status, result, disposition, nonce),
             ).rowcount
             if changed != 1:
                 raise ValueError("only an uncertain reservation can be reconciled")

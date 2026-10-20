@@ -84,6 +84,9 @@ class MediatedExecutor:
             actor=operator.subject,
             provider_reference=reference,
             pending_worker_fenced=pending_worker_fenced,
+            disposition="accepted_for_agent"
+            if receipt.status == "succeeded"
+            else "review_required",
         )
 
     def execute(self, principal: Actor, action: ActionRequest, grant: ExecutionGrant) -> dict:
@@ -137,6 +140,7 @@ class MediatedExecutor:
             amount=amount,
             budget_limit=grant.budget_limit,
             repeatable=grant.repeatable,
+            result_policy="sanitized-receipt-v1:" + self.adapter_digest,
         )
         if replay is not None:
             return replay
@@ -159,7 +163,7 @@ class MediatedExecutor:
             raise ExecutionUnknown(
                 "dispatch outcome is unknown; reconcile with the provider before retry"
             ) from exc
-        self.ledger.finish(grant.nonce, "succeeded", safe_result)
+        self.ledger.finish(grant.nonce, "succeeded", safe_result, disposition="accepted_for_agent")
         return {
             "nonce": grant.nonce,
             "status": "succeeded",
