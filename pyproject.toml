@@ -17,7 +17,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-gemini = ["google-genai>=1.0", "openai>=1.0"]
+gemini = ["google-genai>=1.0", "openai>=1.0", "certifi>=2026.10.19"]
 dev = [
   "build>=1.2",
   "hatchling>=1.25",
@@ -27,6 +27,7 @@ dev = [
 ]
 inspect = [
   "inspect-ai==0.3.281",
+  "certifi>=2026.10.19",
 ]
 
 [project.scripts]
@@ -44,7 +45,7 @@ pythonpath = ["src", "."]
 testpaths = ["tests"]
 
 [tool.uv]
-constraint-dependencies = ["aiohttp>=3.14.5"]
+constraint-dependencies = ["aiohttp>=3.14.5", "certifi>=2026.10.19"]
 
 [tool.ruff]
 target-version = "py311"
