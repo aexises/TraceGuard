@@ -1,12 +1,12 @@
-Action-bound execution and human review
-======================================
+# Signed execution grants and human review
 
-The development control plane now exposes task registration, signed execution grants
-and executor validation. These provide the authorization/reservation contract needed
-by an isolated executor deployment. They do not themselves remove the agent's host
-credentials or create a process/network sandbox.
+Use signed grants when an authenticated agent proposes work to a separate,
+credential-holding executor. The issuer binds each grant to an immutable application
+task, exact action and approved adapter. The executor checks current authority and
+reserves the effect before dispatch. Deployment must separately isolate credentials,
+processes and network access.
 
-**Lifecycle**
+## Action lifecycle
 
 1. Authenticated application administration registers an immutable task for one tenant,
    agent subject and service credential using `POST /v1/tasks/register?tenant_id=...`.
@@ -33,13 +33,15 @@ credentials or create a process/network sandbox.
    authoritative provider receipt before releasing or retrying the operation. There is
    no global exactly-once guarantee across arbitrary third-party APIs.
 
+## Configure the issuer and executor
+
 The relevant Python components are `ExecutionAuthority` in
 `traceguard.control.execution` and `MediatedExecutor` in `traceguard.executor`. Configure
 the executor with its own authenticated Actor, a trusted pinned issuer public key/key ID,
 the deployed adapter artifact digest, a fresh online-validation callback and a narrow
 dispatch function. Use the same private durable ledger for all replicas sharing the same
 execution authority; the current SQLite implementation is a local deployment building
-block, not a distributed database service. See `ledger_lifecycle.md` for mandatory
+block, not a distributed database service. See [ledger lifecycle](ledger_lifecycle.md) for mandatory
 provisioning, expected-identity validation and offline migration. A missing ledger fails
 closed; never replace it with a new database as automatic recovery.
 
@@ -49,21 +51,25 @@ credential storage and private ledger directory are part of the trusted computin
 Separate them from the agent process and enforce network/filesystem isolation in the
 deployment before claiming the stronger profile.
 
-**Limits and failure semantics**
+## Expiry, revocation and uncertainty
 
 Grants expire within 60 seconds. Policy changes observed by pre-dispatch validation revoke
 old grants; revocation cannot undo an already dispatched effect or eliminate every race
 between remote authorization and a provider call. Application identity/revocation checks
 remain necessary at ingress. The base `ControlPlane` stores state in memory; use
 `SQLiteControlPlane` for the supported single-host durable issuer profile described in
-`authority_storage.md`. External key management, distributed fencing and independently
+[authority storage](authority_storage.md). External key management, distributed fencing and independently
 validated operational recovery remain release gates.
+
+## Adapter and provider limits
 
 Delegated observation fields are refused by this execution issuer until an authenticated
 source adapter is supplied. This prevents unsigned source IDs from becoming authority.
 Payment reservations are tested using disposable handlers and Decimal arithmetic; real
 payment/currency/provider semantics remain experimental. Sanitized result receipts are
 not a general data-loss-prevention or final-answer confidentiality guarantee.
+
+## Verification
 
 Validation includes exact-action tampering, wrong identities/audiences/signatures/adapter
 versions, expiry and policy revocation, action-bound review, executor restart/replay,

@@ -1,8 +1,11 @@
-# Shared execution contracts
+# Action and execution contracts
 
-Shared Pydantic contracts live in `traceguard.types`; the current contract identifier
-is `types-v4`. Strict application integration uses `SecuredTools` and an immutable
-`TaskAuthority`. Native integrations use the same `CompiledAuthority` kernel.
+Use these contracts to connect your application to the enforcement boundary and interpret
+its traces. Shared Pydantic models live in `traceguard.types` with contract identifier
+`types-v4`. The embedded `SecuredTools` route copies application authority into strict
+execution; native integrations use the same `CompiledAuthority` kernel.
+
+For a working integration, start with [application integration](integration.md).
 
 ## Authority and proposed calls
 
@@ -21,7 +24,7 @@ unknown or invalid schemas, absent fields and changed adapter contracts fail clo
 Model claims about dependencies are not authoritative taint tracking. Retrieved content,
 tool output, memory and model explanations cannot grant permission or authenticate a source.
 
-## Decisions and enforcement
+## Decisions, rewrites and execution
 
 `SupervisorOutput` expresses `ALLOW`, `BLOCK`, `ESCALATE` or `REWRITE`, with risk and
 bounded reasoning metadata. Contradictory ALLOW decisions (high/critical risk, explicit
@@ -34,6 +37,8 @@ It is schema-validated and reevaluated through the same boundary. A second rewri
 the same step escalates. Escalation is terminal for that boundary's task context.
 Applications own any later planning or human-approved recovery; TraceGuard does not run
 an agent loop or infer renewed authorization from a model explanation.
+
+## Execution plans and containment
 
 `ExecutionPlan` carries the validated effective call, target, container profile, declared
 inputs and limits. `SIMULATED` never calls a real handler or reserves a real effect.
@@ -50,10 +55,14 @@ and `replayed`. `result_released` records whether agent-visible output was accep
 it is not an assertion that the effect was prevented. A timeout after invocation leaves
 an unknown reservation, preserving its budget and task hold across restart.
 
+## Replay and recovery
+
 Ledger reservations bind the approved execution domain, task, action digest and stable
 identity. Accepted results replay only under the same result policy; withheld, missing,
 interrupted or policy-changed results remain withheld or require review. Never repeat an
 uncertain side effect or silently recreate missing storage. See [ledger lifecycle](ledger_lifecycle.md).
+
+## Post-run and sink decisions
 
 `PostRunAssessment` can accept, block or escalate a result. A rewrite-and-retry assessment
 does not automatically redispatch. Agent-visible acceptance does not authorize artifact

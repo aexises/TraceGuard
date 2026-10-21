@@ -1,135 +1,91 @@
-# TraceGuard control plane
+# Control-plane API and deployment
 
-The v1 control plane exposes `/v1/actions/evaluate`, signed policy bundles, policy
-lifecycle endpoints, review resolution, audit export, and an OpenAI-compatible
-`/v1/chat/completions` policy gate. It fails closed when no active policy exists.
+The control plane manages tenant policy, reviews, decision receipts, audit exports
+and signed execution grants. It denies action requests without an active policy.
+A policy decision does not itself execute a tool or prove that an effect occurred.
 
-`ControlPlane` currently ships with an in-memory repository for development and tests.
-Production deployers must supply transactional PostgreSQL persistence, an object-store
-evidence adapter, KMS-backed signing/encryption, a queue worker, and an OIDC identity
-resolver before handling production traffic. The included `token_resolver` is a test and
-development adapter only; it is not an OIDC implementation.
+## Choose the state and identity profile
 
-The SDK can fall back only to a valid Ed25519-signed cached policy bundle and only for rules
-explicitly marked `cache_eligible`. Escalations, blocks, expired bundles, unknown actions,
-and control-plane outages without a qualifying cached rule all remain blocked.
+| Profile | State | Intended use |
+| --- | --- | --- |
+| Bundled `traceguard-api` / `_development_app` | In-memory `ControlPlane`; all state is lost on restart | Disposable development and API tests |
+| Application factory with `SQLiteControlPlane` | Signed, transactional, bounded local SQLite snapshot | Durable single-host authority with trusted key custody and fenced recovery |
+| Distributed service | No supplied shared-state/identity implementation | Requires separate implementation and operational validation |
 
-The bundled API and Kubernetes manifest are development-only. The process owns all
-policy, review, idempotency and audit state in memory. Restarting loses it. The manifest
-uses one replica and `Recreate` updates to avoid overlapping independent stores; this
-also means updates have downtime. Do not scale this backend or describe it as durable.
-Production requires a separate application factory with persistent shared adapters.
+`create_app(control, identity)` accepts the configured control plane and identity
+resolver. The bundled token resolver is a development adapter, not OIDC. Applications
+must authenticate actors and supply tenant membership, roles and service credentials
+from a trusted identity source. [Authority storage](authority_storage.md) describes
+persistence and offline rotation; do not infer distributed safety from local SQLite.
 
-The API refuses to start unless `TRACEGUARD_ALLOW_IN_MEMORY=1` is explicitly set, and
-requires a dedicated signing key and agent token of at least 32 bytes/characters.
-There are no default credentials. Kubernetes loads both credentials from
-`traceguard-secrets` (`signing-key` and `agent-token`). The agent token cannot administer
-policies. A successful `/healthz` checks process health, not production readiness.
+The development factory requires `TRACEGUARD_ALLOW_IN_MEMORY=1`, a dedicated signing
+key of at least 32 bytes and an agent token of at least 32 characters. There are no
+default credentials. Its token is an AGENT for `TRACEGUARD_DEV_TENANT` (default
+`tenant-a`) and cannot administer policy. Follow [setup](../setup.md#5-run-a-local-control-plane-service)
+for a loopback-only launch. `/healthz` checks process health, not deployment readiness.
 
-## Container build and release checks
+## API responsibilities
 
-Use uv 0.13.1 for the lock-based setup described in `setup.md`. Docker installs the
-build tools from `uv.lock`, builds without dependency isolation, and installs runtime
-dependencies from a hashed export of that lock. It copies all packages and bundled
-configurations. The runtime image does not include the build environment or uv.
-The pinned uv bootstrap itself is outside the project lock.
+| Surface | Responsibility |
+| --- | --- |
+| `/v1/actions/evaluate` | Evaluate a typed action under active tenant policy and return an action-bound decision receipt |
+| Policy lifecycle and bundle endpoints | Draft, submit, approve, roll back and distribute signed policy within role scope |
+| Review resolution | Bind a review decision to the original action and authority context |
+| `/v1/tasks/register` | Register immutable strict task authority through authenticated administration |
+| `/v1/execution/grants`, `/v1/execution/validate` | Issue short-lived signed grants and check current authority for an executor |
+| `/v1/audit/export` | Verify and sign the exported audit chain |
+| `/v1/chat/completions` | Evaluate a model request; return 403 on denial or 501 after ALLOW because no upstream forwarding adapter is configured |
 
-Set `PYTHON_IMAGE` to a verified immutable Python 3.11+ image reference. CI uses the
-same multi-architecture base digest as the sandbox configuration. Validate registry
-availability before building. A local build tag is distinct from the published digest:
+The chat-compatible route is a policy gate, not a working general model proxy.
+Use the [execution-grant contract](execution_grants.md) for actual executor integration.
 
-```bash
-export PYTHON_IMAGE='python@sha256:<verified base-image digest>'
-export TRACEGUARD_TAG='<registry>/<repository>:<release-tag>'
-docker buildx imagetools inspect "$PYTHON_IMAGE"
-docker build --build-arg PYTHON_IMAGE="$PYTHON_IMAGE" --tag "$TRACEGUARD_TAG" .
-```
+## Principal scope and idempotency
 
-Publish only through your approved release process. Obtain the **registry manifest**
-digest from that publication (not the local Docker image/config ID), then:
+Identity adapters must provide explicit `Actor.tenant_ids`; an empty set grants no tenant
+access. Public operations check tenant membership and role before state access. Agent
+credentials can further constrain `allowed_operations`. Membership alone does not grant
+an action: active policy and registered strict authority still apply. Never derive
+principal scope from a request body, model output or evidence label.
 
-```bash
-export TRACEGUARD_IMAGE='<registry>/<repository>@sha256:<published manifest digest>'
-docker buildx imagetools inspect "$TRACEGUARD_IMAGE"
-python -m traceguard release-validate \
-  --base-image "$PYTHON_IMAGE" --release-image "$TRACEGUARD_IMAGE" \
-  --output-manifest artifacts/release/control-plane.yaml
-kubeconform -strict -summary -kubernetes-version 1.27.0 artifacts/release/control-plane.yaml
-```
+Decision receipts bind tenant, principal, credential, task and canonical action. Reusing
+an idempotency key with changed payload returns HTTP 409. Receipt expiry or policy
+activation/rollback requires a new key; a cached ALLOW cannot authorize changed policy.
+Transport timestamps/action IDs are not semantic payload. Responses include
+`action_digest`. These are decision receipts, not exactly-once side-effect receipts.
+The development store serializes updates only within one process.
 
-`release-validate` checks image-reference syntax and Docker base-image inputs. With
-`--output-manifest`, it writes a new manifest containing the full immutable image
-reference; it never modifies the template or overwrites an existing artifact. Choose
-a fresh output path for every attempt. Without that option, it only checks inputs.
-It does **not** verify registry existence, signatures, Kubernetes schemas, or production
-adapters; the registry and kubeconform commands above are separate required gates.
-CI's schema check uses a synthetic image reference and does not prove registry availability.
+## Public HTTP execution
 
-Only apply the generated manifest after all gates pass and the two secrets exist:
+`TraceGuardClient.request_http` defaults to public HTTPS. Authorization compares parsed
+origins (scheme, host, effective port), path segment boundaries and exact query strings.
+An omitted query does not allow arbitrary parameters. Userinfo, fragments, traversal,
+encoded aliases, control characters and ambiguous authority forms are denied.
+Non-HTTP legacy prefixes do not establish filesystem or object authorization.
 
-```bash
-kubectl -n traceguard apply -f artifacts/release/control-plane.yaml
-```
+The transport requires all DNS answers to be public, connects to a validated IP and
+checks TLS against the original hostname. It ignores proxy environment variables,
+bounds response bytes and rejects redirects. New destinations need fresh evaluation;
+Host/framing headers cannot replace the approved authority. Tests use fake DNS and
+connections, not live public services. Validate the real provider separately.
 
-The existing non-root user, read-only filesystem, dropped capabilities, disabled
-service-account-token mount, and runtime-default seccomp profile remain required.
-This command deploys a disposable development service, not a production control plane.
+## Offline read policies and audit integrity
 
+`SignedPolicyCache` accepts a pinned Ed25519 public verification key, tenant, audience,
+service credential ID and key ID. It receives no signing secret. Bundles last at most
+five minutes and carry a checked activation epoch. Only explicit `cache_eligible`
+HTTP GET/HEAD rules can authorize offline work.
 
-## Principal scope
+BLOCK, ESCALATE, unknown actions, expired bundles, authorization/schema/throttle errors
+and TLS failures do not become offline ALLOW. Outage fallback needs a valid qualifying
+bundle. Revocation can lag until expiry, so this route cannot authorize consequential
+effects. Reconciliation retains unacknowledged decisions on failure; it does not prove
+that a provider executed an action.
 
-Identity adapters must supply explicit `Actor.tenant_ids`; an empty set grants no tenant access.
-Every public service operation checks tenant membership and role before accessing state.
-Agent credentials may additionally constrain `allowed_operations`. Resource access remains
-bounded by the tenant's active policy; membership alone never supplies an ALLOW.
-The development token belongs only to `TRACEGUARD_DEV_TENANT` (default `tenant-a`).
-Do not obtain principal scopes from an action body, model output or evidence labels.
-
-
-Idempotency receipts are bound to tenant, principal, credential, task and canonical action.
-Changed payload reuse returns HTTP 409. Policy activation/rollback or receipt expiry also
-requires a new key; a cached ALLOW never authorizes work under a changed policy. Transport
-request timestamps/action IDs are not semantic payload. Responses include `action_digest`.
-These are decision receipts, not proof of execution or an exactly-once side-effect guarantee.
-The development store serializes policy/decision updates within one process only.
-
-
-## Public HTTP execution profile
-
-HTTP target rules now compare parsed origins (scheme, host and effective port), path
-segment boundaries and exact query strings. Userinfo, fragments, path traversal/encoded
-aliases, control characters and ambiguous authority forms are denied. A query omitted
-from a scope grants no arbitrary query parameters. Non-HTTP legacy target prefixes are
-not advertised as filesystem/object authorization.
-
-`TraceGuardClient.request_http` defaults to public HTTPS transport: DNS answers must all
-be public, the socket uses a validated IP while TLS authenticates the original hostname,
-proxy environment variables are ignored, response bytes are bounded and redirects are
-rejected. A new destination must be explicitly evaluated. Unsafe Host/framing headers
-cannot replace the evaluated authority. Network tests use fake DNS/connections, not
-external sites; live public-service integration remains a separate release gate.
-
-
-## Offline grants and audit-v2 migration
-
-The cache accepts a pinned Ed25519 **public verification key**, tenant, audience, service
-credential ID and key ID. It receives no signing secret. Bundles have at most five minutes
-of validity, carry a monotonically checked activation epoch and can authorize only explicit
-HTTP GET/HEAD rules. Auth/authorization/schema/throttle HTTP errors and TLS failures never
-trigger fallback. Offline policy revocation can still lag until expiry; do not use offline
-grants for consequential effects. Reconciliation keeps unacknowledged decisions on failure;
-it reconciles decisions, not proof that an external effect actually occurred.
-
-Policy and audit keys are purpose-separated. The development backend derives them from
-the configured high-entropy seed; KMS/rotation and durable revocation remain release work.
-Audit-v2 hashes event ID, timestamp, sequence and complete canonical event metadata. Export
-verifies the chain and signs its count/head with the separate audit identity. Process-local
-head checks detect local corruption/truncation, but independent durable checkpoints and
-storage access control remain necessary for production tamper evidence.
-
-Example cache configuration in application-owned code:
+Example configuration in trusted application code:
 
 ```python
+from traceguard.sdk import SignedPolicyCache
+
 cache = SignedPolicyCache(
     policy_public_key,
     tenant_id="tenant-a",
@@ -139,17 +95,58 @@ cache = SignedPolicyCache(
 )
 ```
 
-Obtain/pin `policy_public_key` through trusted deployment configuration, not the same
-unauthenticated response carrying the bundle. Recreate the cache with approved keys and a
-trusted minimum epoch during rotation. A valid signature does not authenticate arbitrary
-retrieved evidence or attest to tool correctness.
+Obtain `policy_public_key` through trusted deployment configuration, independently of the
+bundle response. During rotation, recreate verifiers with approved keys and a trusted
+minimum epoch. A policy signature does not authenticate retrieved content or handlers.
 
+Policy, execution and audit signing purposes are separated. Audit-v2 hashes event ID,
+timestamp, sequence and complete canonical metadata; export verifies the chain and signs
+its count/head. Local head checks detect local corruption/truncation. Independently
+protected checkpoints and storage controls remain necessary against hostile rollback.
+The [persistent profile](authority_storage.md) supports durable revocation and offline
+rekeying; KMS custody and online/distributed rotation are not supplied.
 
-## Typed execution grants
+## Build and validate deployment artifacts
 
-The task/grant/validation endpoints and separate EXECUTOR role are documented in
-[the execution contract](execution_grants.md). Evaluation receipts alone are not
-single-use execution authorization. Task registration requires application administration;
-review approvals are bound to the action, principal, task and policy epoch. The development
-issuer remains in memory; the optional executor ledger is durable local SQLite and must
-be isolated from the agent and preserved across executor restarts.
+Use the locked build in [setup](../setup.md). Docker installs locked build tools, builds
+without dependency isolation and installs runtime dependencies from a hashed lock export.
+The runtime omits uv and the build environment. The pinned uv bootstrap is outside the
+project lock. Choose and verify an immutable base before building:
+
+```bash
+export PYTHON_IMAGE='python@sha256:25976e9d34a0fab1f278cae931f34c8303d97bf0c0d7f85b6b4dcf641d7702a4'
+export TRACEGUARD_TAG='<registry>/<repository>:<candidate-tag>'
+docker buildx imagetools inspect "$PYTHON_IMAGE"
+docker build --build-arg PYTHON_IMAGE="$PYTHON_IMAGE" --tag "$TRACEGUARD_TAG" .
+```
+
+Publish only through an approved process. Obtain the published **registry manifest**
+digest, not a local Docker config/image ID, then validate a fresh output path:
+
+```bash
+export TRACEGUARD_IMAGE='<registry>/<repository>@sha256:<published-manifest-digest>'
+docker buildx imagetools inspect "$TRACEGUARD_IMAGE"
+traceguard release-validate \
+  --base-image "$PYTHON_IMAGE" --release-image "$TRACEGUARD_IMAGE" \
+  --output-manifest artifacts/release/control-plane.yaml
+kubeconform -strict -summary -kubernetes-version 1.27.0 artifacts/release/control-plane.yaml
+```
+
+`release-validate` checks reference syntax and Docker base inputs. It does not check
+registry existence, signatures, Kubernetes schemas or application adapters. Rendering
+never overwrites an existing output. The registry and schema checks are separate gates;
+CI's synthetic reference proves only schema validity, not registry availability.
+
+The Kubernetes template is a one-replica in-memory development service with `Recreate`
+updates and downtime. Never scale it as a shared authority. Before applying a generated
+manifest, all candidate gates must pass and `traceguard-secrets` must contain dedicated
+`signing-key` and `agent-token` entries in the namespace:
+
+```bash
+kubectl -n traceguard apply -f artifacts/release/control-plane.yaml
+```
+
+Preserve non-root execution, read-only root, dropped capabilities, disabled service
+account token mount and runtime-default seccomp. This remains a development deployment.
+Target identity, key custody, persistence, fencing, transport perimeter and recovery need
+separate validation before any supported production service.

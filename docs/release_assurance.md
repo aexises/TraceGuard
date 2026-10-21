@@ -1,97 +1,107 @@
-# Release assurance and outstanding owner decisions
+# Release assurance
 
-The current status is **experimental, no supported production release**. No
-independent reviewer or application pilot has been arranged. No distribution license
-has been selected. The release-candidate workflow deliberately fails without their
-evidence; no tag, package publication or automatic promotion is configured.
+TraceGuard has no supported production release. No independent reviewer or application
+pilot is currently arranged, and no distribution license has been selected. The manual
+candidate workflow intentionally refuses promotion without authentic evidence. It does
+not publish a package, create a release tag or automatically promote a candidate.
 
-## Repeatable local checks
+## Promotion requirements
 
-Use the locked development environment, install `uv==0.13.1`, and fetch full Git
-history. From the checkout run:
+| Gate | Required evidence |
+| --- | --- |
+| Engineering validation | Candidate-bound tests, container conformance, installed-wheel checks, scans and build artifacts |
+| Independent security review | Identified independent reviewer, exact scope/revision, reproducible findings and no unresolved blockers |
+| Held-out evaluation | Frozen compatible baseline/arms, independently labeled effects, complete outcomes and prespecified acceptance criteria |
+| Application pilots | Two distinct real application organizations with utility, prohibited effects, release and recovery evidence |
+| License approval | Owner-selected license, contribution rights, complete `LICENSE` and matching package metadata |
+| Deployment validation | Target identity, key custody, private state, fencing/recovery and network/transport boundary checks |
 
-```sh
+Automated checks enforce document structure and integrity. An accountable owner must
+verify that external work occurred and that identities, independence and outcomes are
+credible. Hashes and positive JSON fields cannot establish those facts.
+
+## Generate engineering evidence
+
+Use the locked development environment and fetch complete Git history. Run:
+
+```bash
 python -m traceguard.validation.release_checks --output artifacts/security
 python -m traceguard.validation.release_assurance --digest-only
 python -m traceguard.validation.release_assurance
 ```
 
-The first command verifies the pinned Gitleaks archive SHA-256 before extraction,
-scans all fetched refs and non-ignored publication source with full redaction,
-exports hash-pinned core/all-extra requirements and runs pinned pip-audit with no
-dependency installation. Any scanner, integrity, size-limit, advisory or secret
-finding failure stops the check. Ignored local credentials are outside the source
-publication scan. No test/source blanket exemptions are supplied. `scan.json` is
-created only after every scan passes. JSON advisories and CycloneDX dependency SBOMs
-are retained. SBOMs describe resolved dependencies, not every file in an artifact.
-The product has no native benchmark VCS environment. Registry advisory checks cover
-its distributed dependency profiles; they are not upstream source-code audits.
+The scan runner verifies the pinned Gitleaks archive hash before extraction, then scans
+fetched refs and non-ignored publication source with full redaction. It exports hashed
+core/all-extra requirements and runs pinned pip-audit without installing dependencies.
+Scanner failure, integrity/size-limit failure, a secret finding or an advisory stops the
+check. `scan.json` is written only after every scan succeeds. Retain the advisory JSON
+and CycloneDX dependency SBOMs; they describe dependencies, not every artifact file.
 
-Sources: [pip-audit](https://github.com/pypa/pip-audit),
-[Gitleaks](https://github.com/gitleaks/gitleaks), and
+Ignored credentials and unfetched remote objects are outside the publication-source
+scan. Known-advisory checks are platform/time bounded and do not audit upstream source.
+Run them on each supported platform before promotion. Scanner version pins do not prove
+the trustworthiness of the scanner's own transitive dependencies.
+
+Tool references: [pip-audit](https://github.com/pypa/pip-audit),
+[Gitleaks](https://github.com/gitleaks/gitleaks),
 [GitHub attestations](https://github.com/actions/attest/tree/v4).
-Known-advisory scanning is time/platform bounded; run on each supported platform
-before promotion. Pinning the scanner version does not independently establish the
-trustworthiness of its own transitive tool dependencies.
+See [verification](verification.md) for the complete engineering coverage map.
 
-## Owner license decision
+## Prepare external review and pilots
 
-The owner must select a license, confirm the right to license contributed code,
-add the complete `LICENSE`, and set matching package metadata. This work does not
-grant new rights. Consider the actual
-[Apache 2.0 terms](https://www.apache.org/licenses/LICENSE-2.0) or
-[MIT terms](https://opensource.org/license/mit); do not treat this paragraph as
-license approval. Until selection, `license-approval` evidence is missing.
+Give the reviewer the candidate's source digest, exact commit, [security model](security_framework.md),
+verification guide, test logs, isolated-executor canary, advisory reports and SBOMs.
+Require explicit scope/exclusions, methodology, reviewer identity/affiliation, findings,
+reproductions, fixes and unresolved blockers. Include authority bypass, replay,
+uncertainty, restart, rotation and release boundaries. Changed governed source needs
+new content-bound review; a maintainer checklist is not independent review.
 
-## External review packet
+For two distinct application organizations, start with disposable data and narrow
+permissions. A read/report application can use the existing surface; a real provider
+integration first needs a typed, receipt-verifiable adapter. Record accountable owners,
+deployment identity, approvals, benign utility, actual prohibited effects/data releases,
+unknown-outcome recovery, false blocks, latency/cost and operator interventions.
+The local report canary does not count as either pilot.
 
-Give a reviewer this branch's source digest, exact commit, threat model, maintained verification guide,
-test logs, isolated-executor canary, dependency reports and SBOMs. Ask an
-independent reviewer to reproduce bypass/replay/uncertainty/restart/rotation/data
-release tests and inspect the trust boundaries. Record reviewer identity and
-affiliation, scope/exclusions, methodology, findings, reproductions, fixes and
-unresolved blockers. Re-review changed governed source. A self-authored checklist
-does not constitute independent review.
+Use the [external evaluation protocol](security_evaluation.md) to freeze matched
+baselines, budgets and independently labeled held-out/adaptive tests. Define acceptance
+criteria before measurement. Synthetic fixtures cannot establish comparative efficacy.
 
-Recruit two distinct application organizations. Start with disposable data and
-minimal side-effect permissions; run one read/report application and one real
-provider integration only after that provider has a typed, receipt-verifiable
-adapter. For each pilot record owners, deployment identity, grant/approval flows,
-benign utility, prohibited effects, data release, unknown-outcome recovery,
-false blocks, latency/cost, operator interventions and unresolved incidents.
-The existing report canary is local integration validation, not either pilot.
+## Approve distribution rights
 
-Use the [evaluation protocol](security_evaluation.md) for independently labeled,
-held-out/adaptive tests against an explicit matched deterministic baseline and
-relevant external systems under compatible conditions. Set acceptance criteria
-before measurement. Do not claim superiority from synthetic fixtures.
+The owner must select a license, confirm rights to contributed code, add the complete
+`LICENSE` and update package metadata consistently. No license is selected by this guide.
+Review actual [Apache 2.0](https://www.apache.org/licenses/LICENSE-2.0) or
+[MIT](https://opensource.org/license/mit) terms if considering those options.
+Until approval, `license-approval` evidence remains absent.
 
-## Evidence envelope and workflow
+## Assemble the evidence envelope
 
-After actual work, add `configs/release_evidence.json` with these fields:
-`source_digest`, `reviewed_revision` (40-hex), `maintainer_organization`,
-`license_spdx`, `license_sha256`, and `evidence`.
-Each evidence record contains `kind`, `organization`, `accountable_person`,
-`source_digest`, `reference` (a traceable HTTPS record), `path` (a repository-relative
-report), `sha256`, `accepted: true`, and `unresolved_blockers: 0`.
-Required kinds are `independent-review`, `heldout-evaluation`, `license-approval`,
-and two `pilot` records from distinct organizations. Duplicate reports/references,
-same-organization review, missing documents, changed hashes or source mismatches
-fail. Never add placeholder positive records to satisfy this gate.
+After the work is complete, add `configs/release_evidence.json` with:
 
-The digest binds source, tests, configuration data, workflows and build
-inputs, excluding only the envelope itself, caches and compiled Python. Evidence
-reports and license are separately hash-bound. `reviewed_revision` is traceability
-metadata; digest equality establishes content binding, not the reviewer's identity.
-The validator checks document integrity and maintainer assertions. A trusted owner
-must verify identities, independence, evaluation validity and pilot results. No
-JSON schema or hash proves that external work occurred.
+- `source_digest`, `reviewed_revision` (40 hexadecimal characters) and `maintainer_organization`.
+- `license_spdx` and `license_sha256`.
+- `evidence`, containing the records below.
 
-The manual main-only candidate workflow checks evidence, lint/tests including
-Docker canaries, scans, package build and isolated integration before attesting
-wheel/sdist provenance and dependency SBOMs. It uploads candidate artifacts and
-checksums, without publishing a supported release. Its signing path cannot be
-exercised honestly until the missing external evidence and owner decisions exist.
-Protect the default branch and review changes to release gates/workflows before
-using it for distribution. Configure organizational reviewers and deployment
-approvals when maintainers are available; none are fabricated here.
+Each record requires `kind`, `organization`, `accountable_person`, `source_digest`,
+`reference` (a traceable HTTPS record), `path` (repository-relative report), `sha256`,
+`accepted: true` and `unresolved_blockers: 0`. Required kinds are `independent-review`,
+`heldout-evaluation`, `license-approval` and two `pilot` records from distinct organizations.
+Duplicate reports/references, same-organization review, absent documents, changed hashes
+and source mismatches fail. Never insert placeholder success records.
+
+The source digest covers source, tests, configuration, workflows and build inputs,
+excluding the evidence envelope itself, caches and compiled Python. Reports and license
+are separately hash-bound. `reviewed_revision` provides traceability; content binding
+comes from digest equality. Identity and evaluation validity remain owner checks.
+
+## Run the candidate workflow
+
+The manual main-only workflow checks evidence, lint, tests including Docker canaries,
+scans, package build and isolated integration before attesting wheel/sdist provenance
+and dependency SBOMs. It uploads candidate artifacts and checksums without publishing
+a supported release. Missing external evidence must continue to stop this path.
+
+Protect the default branch and review changes to release gates/workflows. Configure
+organizational reviewers and deployment approvals when accountable maintainers are
+available. Passing engineering checks alone cannot satisfy the external gates.

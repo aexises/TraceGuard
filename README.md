@@ -1,71 +1,51 @@
 # TraceGuard
 
-TraceGuard is an experimental security framework for governing tool-using AI agents.
-Trusted applications define permissions; TraceGuard checks proposed actions, mediates
-execution, preserves uncertain outcomes, and controls release of results and artifacts.
-There is no supported production release yet. See [security reporting](SECURITY.md)
-and [release assurance](docs/release_assurance.md) for scope and remaining release gates.
+**Control which actions an AI agent can execute and which results it can release.**
 
-## Integrate an application
+TraceGuard is a security framework for applications that let AI agents use tools.
+Your application defines the approved task and permissions. TraceGuard checks each
+proposed action against that authority, mediates supported tool execution, records
+side effects durably, and applies separate controls to data leaving the boundary.
 
-The embedded entry point is `traceguard.security.SecuredTools`. The application owns
-its agent loop, tool handlers, approved task, workspace, credentials and classification
-labels. Model output and retrieved text cannot grant permissions.
+Use it to scope document access, constrain generated reports, enforce action budgets,
+and stop uncertain operations from being repeated after a timeout or restart.
+Your application keeps its planner, models and conversation loop.
 
-```python
-from pathlib import Path
+**Status:** experimental. There is no supported production release or selected
+distribution license yet. Independent review, external evaluation and real application
+pilots remain [release requirements](docs/release_assurance.md).
 
-from traceguard.security import SecuredTools
-from traceguard.tools.registry import default_registry
-from traceguard.types import TaskAuthority, ToolCall
+## How it works
 
-workspace = Path("/application/workspace")
-boundary = SecuredTools(
-    default_registry(workspace, workspace / "artifacts"),
-    TaskAuthority(
-        allowed_tools=["read_file"],
-        argument_values={"read_file": {"path": "inputs/approved.txt"}},
-    ),
-    task_id="application-approved-task",
-)
-result = boundary.execute_call(
-    "Read the approved document",
-    ToolCall(
-        task_id="application-approved-task",
-        step_id=0,
-        tool_name="read_file",
-        arguments={"path": "inputs/approved.txt"},
-    ),
-    [],
-)
-# Give the agent only result.observation when it is present.
-```
+1. **Approve a task.** Trusted application code supplies identity, allowed tools,
+   arguments, resources and budgets. Prompts and retrieved content cannot grant access.
+2. **Check the effective action.** TraceGuard validates the tool schema, normalizes
+   reviewed defaults and checks deterministic authority. An optional LLM supervisor
+   can withhold an action or propose a rewrite; every rewrite passes the checks again.
+3. **Execute through the boundary.** Supported handlers run only after authorization.
+   Consequential actions reserve their identity and budget in a private durable ledger.
+4. **Account for the outcome.** Replays use accepted receipts. A possibly completed
+   effect holds the task for reconciliation instead of being blindly retried.
+5. **Authorize release.** Execution permission is separate from permission to publish
+   an artifact, send data to a model provider or return a final answer.
 
-Consequential tools additionally require a provisioned private execution ledger and
-its application-configured identity. Provision once through trusted administration;
-never recreate missing state during a request or restart. See
-[ledger lifecycle](docs/ledger_lifecycle.md) and [execution grants](docs/execution_grants.md).
+## Choose an integration
 
-## Security boundaries
+| Route | Use it for | Boundary you must supply |
+| --- | --- | --- |
+| [Embedded `SecuredTools`](docs/integration.md) | Add strict tool enforcement to an application-owned agent loop | Trusted application and handlers; protect credentials and prevent raw dispatch |
+| [Native Inspect integration](docs/inspect_execution.md) | Govern reviewed reads and explicitly wrapped native tool calls | A trusted solver that exposes only guarded callbacks |
+| [Isolated report executor](docs/isolated_executor.md) | Separate an untrusted agent from report-writing authority | Workload identities, private state and a validated container/network deployment |
+| [Control-plane API](docs/control_plane.md) | Centralize tenant policy, reviews and signed execution grants | An authenticated application factory and an appropriate state backend |
 
-- Explicit tool, argument, object, source and budget grants are compiled with reviewed
-  schemas and effect descriptors. Missing, unknown or invalid authority withholds work.
-- Optional LLM supervision may block or propose a narrower action; it cannot expand
-  deterministic permission. Every rewrite is validated and checked again.
-- Durable reservations prevent budget resets and blind retries after uncertain effects.
-  Execution and permission to release a result are separate persisted states.
-- The embedded profile trusts application code. The isolated report profile separates
-  agent, issuer and executor with pinned mTLS identities and constrained credentials.
-- Container staging and output collection are bounded. Artifacts remain quarantined
-  until an explicit release decision; model inputs and final answers have separate gates.
+The isolated executor currently exposes a narrow public text/JSON report operation.
+The bundled HTTP service and Kubernetes template are development profiles. A generic
+provider proxy, arbitrary shell execution and unrestricted connectors are not supplied.
+See the [security model](docs/security_framework.md) for the trust assumptions of each route.
 
-This is complete mediation only for the configured supported routes. Raw callbacks,
-provider credentials and unrestricted network paths must stay outside an adversarial
-agent's reach. Read the [security contract](docs/security_framework.md) before deployment.
+## Try it locally
 
-## Install and verify
-
-Python 3.11+ is required. Docker is required for container validation.
+From a checkout, use Python 3.11+ and the committed dependency lock:
 
 ```bash
 python3 -m venv .venv
@@ -74,24 +54,77 @@ python -m pip install uv==0.13.1
 uv sync --locked --extra dev --no-install-project
 uv sync --locked --extra dev --no-build-isolation --no-editable
 traceguard smoke
-python -m pytest -q
 ```
 
-See [setup and operations](setup.md) for optional supervisors/Inspect, Docker validation,
-package verification and the single-host development deployment profile.
+The smoke command runs an explicitly authorized calculation offline. It needs no model
+credentials or Docker. See [setup](setup.md) for optional integrations and container checks.
+
+This complete example permits one document and withholds a different path:
+
+```python
+from pathlib import Path
+from tempfile import TemporaryDirectory
+
+from traceguard.security import SecuredTools
+from traceguard.tools.registry import default_registry
+from traceguard.types import TaskAuthority, ToolCall
+
+with TemporaryDirectory() as temporary:
+    workspace = Path(temporary)
+    (workspace / "inputs").mkdir()
+    (workspace / "inputs/approved.txt").write_text("Approved document", encoding="utf-8")
+    (workspace / "inputs/private.txt").write_text("Private document", encoding="utf-8")
+    boundary = SecuredTools(
+        default_registry(workspace, workspace / "artifacts"),
+        TaskAuthority(
+            allowed_tools=["read_file"],
+            argument_values={"read_file": {"path": "inputs/approved.txt"}},
+        ),
+        task_id="read-approved-document",
+    )
+    for step, path in enumerate(("inputs/approved.txt", "inputs/private.txt")):
+        result = boundary.execute_call(
+            "Read the approved document",
+            ToolCall(
+                task_id="read-approved-document",
+                step_id=step,
+                tool_name="read_file",
+                arguments={"path": path},
+            ),
+            [],
+        )
+        if result.observation is not None:
+            print(result.observation.content)
+        else:
+            print(f"Withheld: {path}")
+```
+
+Only accepted observations go back to the agent. Application-owned classification and
+sink permissions still determine whether those data may leave the application.
+Consequential tools also need a provisioned ledger; follow the
+[integration guide](docs/integration.md) before adding writes or external effects.
+
+## Security scope
+
+TraceGuard enforces configured authority on supported execution routes. Unknown effects,
+unreviewed read mappings, invalid schemas and missing authority withhold work. Strict
+deterministic enforcement is mandatory on the public embedded route.
+
+The application must prevent bypass through raw handlers, provider credentials,
+unrestricted network access or writable state. Embedded Python does not isolate arbitrary
+hostile code. Data release uses trusted classifications and bounded checks; it is not
+general semantic secret detection. Passing tests does not establish universal prompt
+injection resistance or independent certification.
 
 ## Documentation
 
-- [Security contract and trust model](docs/security_framework.md)
-- [Shared execution contracts](docs/contracts.md)
-- [Control-plane API and deployment](docs/control_plane.md)
-- [Signed execution grants and reviews](docs/execution_grants.md)
-- [Persistent authority and rotation](docs/authority_storage.md)
-- [Ledger lifecycle and recovery](docs/ledger_lifecycle.md)
-- [Read resource mappings](docs/read_resource_contract.md)
-- [Native Inspect integration](docs/inspect_execution.md)
-- [Isolated report executor](docs/isolated_executor.md)
-- [Artifact and data release](docs/data_release.md)
-- [Verification coverage and limitations](docs/verification.md)
-- [External security evaluation protocol](docs/security_evaluation.md)
-- [Release assurance and outstanding gates](docs/release_assurance.md)
+Start with the [documentation map](docs/index.md), then choose:
+
+- **Build:** [setup](setup.md), [application integration](docs/integration.md),
+  [contracts](docs/contracts.md), [read resource mappings](docs/read_resource_contract.md).
+- **Operate:** [signed grants and reviews](docs/execution_grants.md),
+  [authority storage](docs/authority_storage.md), [ledger recovery](docs/ledger_lifecycle.md),
+  [data release](docs/data_release.md).
+- **Assess:** [security model](docs/security_framework.md),
+  [verification coverage](docs/verification.md), [external evaluation](docs/security_evaluation.md),
+  [release assurance](docs/release_assurance.md), [vulnerability reporting](SECURITY.md).

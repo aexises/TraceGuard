@@ -1,8 +1,11 @@
-# Execution ledger lifecycle
+# Execution ledger operations
 
-The supported profile uses one application-owned local SQLite ledger for each execution
-domain. It is not a distributed replica or anti-rollback service. Protect the database,
+Use the execution ledger to preserve effect reservations, task budgets and accepted
+receipts across worker restarts. The supported profile uses one application-owned local
+SQLite ledger for each execution domain. It is not a distributed replica or anti-rollback service. Protect the database,
 WAL, configuration and backups together; privileged host administrators remain trusted.
+
+## Provision once and pin the identity
 
 Trusted deployment calls `ExecutionLedger.provision(path)` once and persists its returned
 identity outside the database, in protected deployment configuration. Provisioning refuses
@@ -12,11 +15,15 @@ Task registration must name that same domain, which is included in every signed 
 All executor audiences for a task must use the same store. An independently initialized
 store has a different identity and cannot accept that task's grant.
 
+## Stop on missing or inconsistent state
+
 Missing, empty, replaced, incompatible or wrong-identity storage stops admission. Do not
 provision a replacement to handle an error. Fence admission/workers, recover the original
 state and reconcile provider effects before resuming. Restoring an old backup without
 reconciling later effects can repeat them; this library cannot prove an offline backup is
 the latest state. Do not run old binaries against upgraded storage.
+
+## Reconcile uncertain effects
 
 Reservations serialize consequential actions per tenant/task. Pending or unknown records
 hold all new consequential actions, including changed generated content, identities and
@@ -26,6 +33,8 @@ receipt. Resolving pending crash records also requires `pending_worker_fenced=Tr
 after the old process is fenced; a caller-supplied status is never provider evidence.
 Resolving one record does not clear another unresolved record. Embedded applications
 must supply their own trusted reconciliation integration; automatic continuation is absent.
+
+## Preserve result withholding
 
 Schema v3 separates execution status from result disposition. A successful effect may
 still have `pending_review`, `withheld` or `review_required` output. Those states withhold
@@ -43,6 +52,8 @@ the review-enabled flag are also bound. A changed policy invalidates cached acce
 durably, even if the old version is subsequently restored. There is no automatic
 reconsideration of an already withheld or review-required record; trusted recovery must
 reconstruct evidence and obtain new authorization while admission stays fenced.
+
+## Migrate legacy state offline
 
 For legacy v1/v2 ledgers, stop consumers and all dispatchers first. On a disposable copy,
 call `ExecutionLedger.migrate_legacy(path, backup=unused_backup_path,

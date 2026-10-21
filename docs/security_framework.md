@@ -1,10 +1,34 @@
-# Security contract and trust model
+# Security model and architecture
 
-TraceGuard is an experimental security framework with a narrow supported execution
-surface. It is not production-certified and does not implement an autonomous agent.
-The application owns planning, trusted identity, approved tasks, handlers and credentials.
+TraceGuard separates an agent's proposed action from application permission to execute
+it. Its security claim is bounded: supported routes must enforce trusted task authority,
+retain uncertain effects and withhold unapproved releases. The application owns planning,
+identity, approved tasks, handlers and credentials. The project is experimental and has
+no supported production release.
 
-## Trusted boundary
+## Action flow
+
+```text
+Application approval --> strict task authority + reviewed tool contract
+                                      |
+Agent proposal --> normalize + validate + authorize --> optional supervisor
+                                      |                (withhold or rewrite)
+                                      v
+                        reserve consequential effect
+                                      |
+                             guarded dispatch
+                                      |
+                         persist effect/result state
+                                      |
+                          accepted observation
+                                      |
+                         separate sink authorization
+```
+
+A rewritten call returns through the same validation and authority checks. A policy
+decision without mediated dispatch does not account for real effects.
+
+## Trust roots and adversarial inputs
 
 Trust roots are application-authenticated principals and source identity, immutable task
 grants, reviewed tool schemas/effect descriptors, the policy publisher, executor, and
@@ -37,6 +61,8 @@ See [execution grants](execution_grants.md) and [persistent authority](authority
 | Isolated reports | Non-root agent/issuer/executor separation, exact pinned mTLS identities, deployed adapter hash, quarantined public report publication | Single-host state, operator fencing/key custody, Docker and the target network perimeter remain trusted |
 | Control plane | Tenant/role admission, signed bounded SQLite authority, review/grant/receipt/revocation state | Development API identity and Kubernetes templates are not a production identity or distributed state service |
 
+## Durable effects and disclosure
+
 Pending and unknown effects hold their task even after changed payloads, keys or process
 restart. Missing, wrong or incompatible ledgers fail closed. Result acceptance is persisted
 separately from execution: replay cannot expose withheld bytes or blindly redispatch an
@@ -47,7 +73,7 @@ already-public truth. Separate gates apply to model-provider inputs, final answe
 artifact publication. The supported text/JSON classifier needs trusted source/application
 labels; it is not general semantic DLP. See [data release](data_release.md).
 
-## Reference requirements
+## External design and evaluation requirements
 
 These references define design and evaluation requirements, rather than evidence of
 TraceGuard's superiority or certification:

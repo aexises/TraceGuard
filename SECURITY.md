@@ -1,28 +1,46 @@
 # Security policy
 
-TraceGuard is an experimental security framework. There is currently no supported
-production release or response-time SLA. Passing CI is implementation evidence;
-independent security review, held-out adversarial evaluation and real application
-pilots remain required before a supported release.
+## Supported status
 
-Report vulnerabilities privately through
-[GitHub private vulnerability reporting](https://github.com/aexises/TraceGuard/security/advisories/new).
-Private reporting is enabled for this repository. Include the affected commit,
-deployment profile, trust assumptions, harmless reproduction, expected/observed
-effects and relevant redacted traces. Do not include live credentials, customer
-data, hidden model reasoning or destructive payloads. Use disposable fixtures.
+TraceGuard is experimental. No version currently has a supported production release,
+response-time SLA or security certification. CI and local conformance establish specific
+engineering behavior; independent review, held-out evaluation and application pilots
+remain [release requirements](docs/release_assurance.md).
 
-The maintainer will assess reports as capacity permits. There is no bounty or
-guaranteed response deadline. Coordinate disclosure with the maintainer; do not
-publish sensitive exploit details in a public issue while a report is unresolved.
+## Report a vulnerability
 
-Use the strict, isolated execution profile for security evaluation. Research-mode
-application-owned classification labels, local SQLite backup/fencing,
-and the narrow report adapter have explicit limitations in
-[the verification guide](docs/verification.md). This repository does
-not establish a universal prompt-injection defense or unrestricted connector safety.
+Use [GitHub private vulnerability reporting](https://github.com/aexises/TraceGuard/security/advisories/new)
+to report a suspected vulnerability privately. Include:
 
-Dependency and publication-source secret scans run in CI and weekly. The scans cover
-known package advisories for the runner platform and fetched repository history;
-they cannot prove absence of vulnerabilities, previously removed remote objects,
-or compromised upstream packages. See [release assurance](docs/release_assurance.md).
+- The affected commit and integration/deployment profile.
+- The trusted and untrusted components involved, including the permission granted.
+- A minimal harmless reproduction using disposable state.
+- Expected and observed authorization, execution and data-release behavior.
+- Relevant redacted traces or receipts, including any uncertain effect.
+
+Keep live credentials, customer data, hidden model reasoning and destructive payloads
+out of reports. Coordinate disclosure with the maintainer before publishing sensitive
+exploit details. Reports are assessed as capacity permits; there is no bounty or
+guaranteed response deadline.
+
+## What to assess
+
+Start with the [security model](docs/security_framework.md) and
+[verification map](docs/verification.md). Evaluate the boundary actually deployed:
+strict embedded execution trusts the application process; the isolated report profile
+adds separate agent, issuer and executor containers. Neither grants safety to raw
+callbacks, unreviewed adapters or credential paths that bypass enforcement.
+
+Important areas include authority expansion, schema/default mismatches, tenant/role
+confusion, replay and uncertain-effect recovery, result withholding, artifact publication,
+provider/final-answer release, certificate identity and private-state access. Use harmless
+canaries. Trusted application classification, local storage/fencing and the narrow report
+adapter have explicit limits; universal prompt-injection resistance is not claimed.
+
+## Supply-chain checks
+
+CI and weekly workflows scan known dependency advisories and publication-source secrets.
+Coverage is limited to resolved dependency profiles on the runner platform and fetched
+Git history/source. Scans do not prove upstream integrity, the absence of vulnerabilities
+or the removal of secrets from remote objects that were not fetched. Rotate exposed
+credentials independently of deleting source. See [release assurance](docs/release_assurance.md).

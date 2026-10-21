@@ -1,8 +1,11 @@
-# Verification coverage and release readiness
+# Verify an integration and release candidate
 
-This is the current engineering verification guide. Use tests and source-bound artifacts
-from the candidate being reviewed; a previous run or historical report does not validate
-changed code. No independent security review or real application pilot is claimed.
+Use this map to identify the maintained checks for each security contract. Run against
+the candidate being reviewed and retain its exact revision, configuration and evidence.
+Prior results do not validate changed code. Engineering checks do not replace independent
+review or application pilots.
+
+## Contract coverage
 
 | Contract | Maintained regression coverage |
 | --- | --- |
@@ -19,11 +22,15 @@ changed code. No independent security review or real application pilot is claime
 | Complete externally supplied outcome protocols and evidence binding | `tests/test_security_evaluation.py` |
 | Immutable deployment references and authentic release evidence requirements | `tests/test_release.py`, `tests/test_release_assurance.py` |
 
+## Local and container validation
+
 Run the full suite, Ruff and package build using [setup](../setup.md). Docker cases are
 opt-in and use harmless canaries with disposable state. The three-container conformance
 command checks authorized report publication, denied bypasses, replay, issuer restart,
 role/key separation and an external TCP denial. Readiness probes wait for listeners before
 application requests; they never retry a possibly dispatched consequential action.
+
+## Supply-chain and artifact validation
 
 Generate current advisory reports, redacted secret scan results and CycloneDX SBOMs with
 `python -m traceguard.validation.release_checks --output artifacts/security`. Both product
@@ -46,6 +53,6 @@ not establish Linux/AMD64 behavior; CI and each supported target need their own 
 - Target-platform identity/key custody, fencing, backup recovery, credential/egress isolation
   and transport perimeter validation.
 
-No reviewer, pilot, distribution license or external efficacy result is manufactured by
-repository cleanup. Follow [release assurance](release_assurance.md) for the evidence schema
+No independent review, real application pilot or external efficacy result is established
+by this coverage map. Follow [release assurance](release_assurance.md) for the evidence schema
 and manual candidate workflow. This guide is engineering documentation, not certification.

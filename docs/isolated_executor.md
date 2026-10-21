@@ -1,4 +1,11 @@
-# Isolated report executor profile
+# Isolated report executor
+
+Use this narrow profile to keep an untrusted agent separate from report-writing
+authority, credentials and persistent state. It supports application-approved public
+text/JSON reports. It is a disposable conformance deployment and a bounded integration
+reference, not a generic provider service.
+
+## Process and identity boundaries
 
 This integration separates a persistent issuer, credential/authority-holding executor and
 untrusted agent into three non-root containers. The agent receives only its short-lived
@@ -8,6 +15,8 @@ mutually authenticated TLS 1.3; services map exact verified leaf-certificate fin
 to application-owned Actor scopes. Identity is never read from a caller-supplied Actor or
 proxy header. Clients verify CA/hostname and pin the server certificate before sending work.
 
+## Approved execution surface
+
 The issuer supports only grant issue/validation. The executor supports only strict
 `write_report`, checks exact deployed Python/effect-descriptor hashes against the approved
 artifact, validates the grant online before and after durable reservation, and releases
@@ -15,6 +24,8 @@ only application-approved public text/JSON through quarantine. Provider receipts
 exact action digest; report-store reconciliation verifies actual released file hashes.
 No arbitrary command, email, payment, model forwarding or generic provider API is exposed
 by this narrow profile.
+
+## Transport admission and resource bounds
 
 The transport authenticates the exact registered certificate immediately after TLS,
 before reading any HTTP request line or headers. Ingress has an absolute monotonic
@@ -39,6 +50,8 @@ disconnect after dispatch cannot establish non-execution; the execution ledger's
 outcome and reconciliation contract still applies. Ingress tests use bounded disposable
 loopback connections and shorter configured deadlines with declared scheduling tolerance;
 they are not production load tests.
+
+## Run disposable conformance
 
 Run the full disposable deployment from the installed package/source checkout:
 
@@ -65,16 +78,20 @@ also reject an unregistered CA-valid certificate, a missing client certificate, 
 server pin, credential revocation and an unapproved adapter artifact. These are disposable
 integration canaries, not two external application pilots or a model security benchmark.
 
+## Configure an application deployment
+
 For deployment, provision certificates and read-only peer registries from your own trusted
 workload PKI; configure distinct identities and narrow tenant/operation scopes. Do not use
 fixture author/approver identities as human governance. Initialize the private authority
 once; mount its seed only into the issuer, and pin the matching execution public key and
 adapter release in the executor. Keep state local to the documented SQLite profile and
-use the same ledger for all workers sharing an authority. Follow `authority_storage.md`
+use the same ledger for all workers sharing an authority. Follow [authority storage](authority_storage.md)
 for fenced recovery, revocation and offline key rotation. Removing a certificate pin
 from the service registry prevents its next application request; TLS expiry and online
 credential revocation provide additional checks. Enforce per-workload network/mount policy
 and rerun conformance in the actual target platform before claiming this profile there.
+
+## Deployment limits
 
 An internal Docker bridge supplies a concrete constrained local integration, not a claim
 that all host services or every network protocol were independently audited. Host/root/

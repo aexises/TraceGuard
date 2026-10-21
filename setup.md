@@ -1,12 +1,12 @@
-# Setup and operations
+# Install, validate and run TraceGuard
 
-TraceGuard supplies a security boundary around application-owned agents. It does not
-supply an agent planner or conversation loop. The application must expose only approved
-execution routes and prevent direct access to the protected handlers and credentials.
+Start with the offline embedded integration. Add Docker, native Inspect or model
+supervision only when your application needs that boundary. TraceGuard supplies
+security controls; your application supplies the agent loop and approved tasks.
 
-## Locked installation
+## 1. Install from the repository
 
-Use Python 3.11 or newer and the committed `uv.lock`:
+Use Python 3.11+ and `uv==0.13.1`. From the repository root:
 
 ```bash
 python3 -m venv .venv
@@ -17,66 +17,137 @@ uv sync --locked --extra dev --no-build-isolation --no-editable
 traceguard smoke
 ```
 
-Optional extras are `gemini` for the Google provider SDK and `inspect` for native Inspect
-integration. Add `--extra gemini` or `--extra inspect` to both sync commands when needed.
-The Ollama transport uses its configured local HTTP endpoint. Load provider configuration
-from the environment using `.env.example`; do not commit credentials or call paid models
-as part of offline checks. Provider data release needs explicit application approval.
+The first sync installs locked build dependencies. The second builds and installs the
+package without an isolated build environment. Keep both steps and the committed
+`uv.lock`; do not replace them with unbounded dependency upgrades.
 
-## Application and state configuration
+Expected smoke output:
 
-Use `SecuredTools` with an application-approved task ID and `TaskAuthority`. Its explicit
-allowlist and field/resource scope are mandatory; user prose is not executable permission.
-Consequential tools require a private `ExecutionLedger`, provisioned once through trusted
-administration. Store its returned identity in trusted configuration and reuse the same
-ledger/domain across workers and restarts. Follow [ledger lifecycle](docs/ledger_lifecycle.md)
-for backups, missing state, migration and recovery. Uncertain effects hold the task until
-fenced, provider-verified reconciliation; changing a call ID or payload cannot clear a hold.
+```json
+{"authorized_result": "84", "strict": true}
+```
 
-For native framework integration use [the Inspect execution route](docs/inspect_execution.md).
-For a separately isolated agent use [the report executor](docs/isolated_executor.md).
-Embedded application code and callbacks remain trusted.
+This check uses disposable files and no model or external provider. Continue with the
+[read example](README.md#try-it-locally) and [application integration](docs/integration.md).
+No PyPI installation or supported release is assumed by these instructions.
 
-## Verification
+### Optional dependencies and provider configuration
+
+| Extra | Purpose | Installation |
+| --- | --- | --- |
+| `inspect` | Native Inspect tool integration | Add `--extra inspect` to both sync commands |
+| `gemini` | Google provider SDK and OpenAI-compatible transport dependencies | Add `--extra gemini` to both sync commands |
+
+Use `.env.example` as the list of environment settings; set values in your process or
+approved secret loader. Do not assume the package loads that file automatically.
+Ollama supervision uses its configured local HTTP endpoint. Optional model supervision
+still requires strict authority and explicit model-input release permission.
+Keep credentials out of source, artifacts and logs. Offline checks do not need them.
+
+## 2. Connect your application
+
+Create `SecuredTools` with a fixed application-approved task ID and an explicit
+`TaskAuthority`. Expose only its guarded execution route to the agent.
+
+Before enabling consequential actions, provision a private `ExecutionLedger` once through
+trusted administration. Persist its identity in protected application configuration and
+reuse the same store across workers and restarts. Do not provision during requests or
+recreate missing state. Follow [ledger operations](docs/ledger_lifecycle.md) for recovery.
+
+Choose [Inspect](docs/inspect_execution.md) for explicit native solver integration or the
+[isolated executor](docs/isolated_executor.md) when the agent must not share the executor's
+credentials and state. Embedded callbacks and host application code remain trusted.
+
+## 3. Run engineering checks
+
+With the locked development environment active:
 
 ```bash
 ruff check .
 ruff format --check .
 python -m pytest -q
 python -m build --no-isolation
-python -m traceguard.validation.release_checks --output artifacts/security
 ```
 
-For live, harmless container tests, first pull the pinned image:
+Docker cases are opt-in; a default pytest run does not execute them. To validate the
+installed wheel, use a fresh temporary environment and run outside the checkout:
 
 ```bash
-docker pull python@sha256:25976e9d34a0fab1f278cae931f34c8303d97bf0c0d7f85b6b4dcf641d7702a4
+CHECKOUT="$PWD"
+WHEEL_CHECK="$(mktemp -d)"
+python -m venv "$WHEEL_CHECK/venv"
+"$WHEEL_CHECK/venv/bin/python" -m pip install "$CHECKOUT"/dist/*.whl
+(
+  cd "$WHEEL_CHECK"
+  "$WHEEL_CHECK/venv/bin/traceguard" smoke
+  "$WHEEL_CHECK/venv/bin/python" -c 'from traceguard.sandbox.config import default_sandbox_configuration_path, load_sandbox_configuration; load_sandbox_configuration(default_sandbox_configuration_path())'
+)
+```
+
+Use a `dist/` containing only the candidate wheel. This isolates the source checkout;
+the wheel command may resolve dependencies from the configured package index. Candidate
+supply-chain scans separately use locked, hashed dependency exports.
+
+## 4. Validate container boundaries
+
+Start Docker and pull the immutable base used by the sandbox configuration:
+
+```bash
+export PYTHON_IMAGE='python@sha256:25976e9d34a0fab1f278cae931f34c8303d97bf0c0d7f85b6b4dcf641d7702a4'
+docker pull "$PYTHON_IMAGE"
 traceguard sandbox-check
 TRACEGUARD_RUN_DOCKER_TESTS=1 python -m pytest tests/sandbox -q
 ```
 
-Build a source-matching image before running the isolated probe. The executor rejects
-an image whose installed adapter differs from the approved code:
+Build from the candidate checkout and run the disposable three-container report probe:
 
 ```bash
-docker build --build-arg PYTHON_IMAGE=python@sha256:25976e9d34a0fab1f278cae931f34c8303d97bf0c0d7f85b6b4dcf641d7702a4 --tag traceguard:local .
-python -m traceguard.validation.isolation_canary --image traceguard:local --output artifacts/isolation.json
+docker build --build-arg PYTHON_IMAGE="$PYTHON_IMAGE" --tag traceguard:local .
+python -m traceguard.validation.isolation_canary \
+  --image traceguard:local --output artifacts/isolation.json
 ```
 
-Run installed-wheel CLI/resource checks outside the source checkout. Keep fresh scan,
-build and conformance evidence bound to the exact candidate. See
-[verification](docs/verification.md) and [release assurance](docs/release_assurance.md).
+The adapter hash must match the approved source. Rebuild after governed adapter changes;
+do not disable that check to reuse an older image. The probe checks real container
+separation and harmless report effects, not a real customer deployment or provider pilot.
+See [isolated executor operations](docs/isolated_executor.md) for its exact scope.
 
-## Control-plane deployment
+## 5. Run a local control-plane service
 
-`traceguard-api` exposes the control-plane HTTP boundary. In-memory development startup
-requires `TRACEGUARD_ALLOW_IN_MEMORY=1`, a dedicated `TRACEGUARD_SIGNING_KEY` and
-`TRACEGUARD_DEV_TOKEN`; never substitute development identity for a production integration.
-The Kubernetes template is a single-replica development profile, with immutable image
-references, read-only root and dropped capabilities. It does not supply production
-identity, KMS, distributed fencing or replica-safe shared state.
+The bundled application deliberately uses in-memory state and a development token
+resolver. For a disposable localhost service, generate dedicated credentials in the
+process environment and bind explicitly to loopback:
 
-Use `traceguard release-validate --base-image "$PYTHON_IMAGE" --release-image "$TRACEGUARD_IMAGE"`
-to validate references. Add `--output-manifest artifacts/control-plane.yaml` to render a new
-manifest. Registry existence/provenance, Kubernetes schema and target-host conformance
-remain separate checks in [the control-plane guide](docs/control_plane.md).
+```bash
+export TRACEGUARD_ALLOW_IN_MEMORY=1
+export TRACEGUARD_SIGNING_KEY="$(python -c 'import secrets; print(secrets.token_hex(32))')"
+export TRACEGUARD_DEV_TOKEN="$(python -c 'import secrets; print(secrets.token_hex(32))')"
+export TRACEGUARD_DEV_TENANT=tenant-a
+python -m uvicorn traceguard.control.api:_development_app \
+  --factory --host 127.0.0.1 --port 8080 --workers 1
+```
+
+In another terminal, `curl --fail http://127.0.0.1:8080/healthz` checks process health.
+No policy is active initially, so action requests fail closed. The agent token cannot
+administer policies. Restart loses this service's state; use an application factory
+with `SQLiteControlPlane` for the bounded durable single-host profile.
+
+`traceguard-api` starts the same development factory on **all interfaces**, port 8080.
+Do not expose it without an appropriate network boundary. The supplied Kubernetes
+template also uses a single-replica development profile, not production identity or
+shared distributed state. See [control-plane deployment](docs/control_plane.md).
+
+## 6. Prepare a release candidate
+
+Generate fresh advisory, secret-scan and SBOM artifacts for the candidate:
+
+```bash
+python -m traceguard.validation.release_checks --output artifacts/security
+python -m traceguard.validation.release_assurance --digest-only
+python -m traceguard.validation.release_assurance
+```
+
+Scans require network access and complete fetched Git history. The final assurance
+command is expected to fail until authentic external evidence and license approval
+exist. Preserve that gate. [Verification](docs/verification.md) explains what each
+check establishes; [release assurance](docs/release_assurance.md) lists promotion criteria.

@@ -1,46 +1,65 @@
-# Effect-grounded evaluation contract
+# Evaluate security using actual effects
 
-Execution traces separate dispatch status from permission to release results. A withheld
-result does not mean an effect was prevented. A post-dispatch failure remains unknown;
-unknown effects cannot count as secure completion. Independent evaluators must bind
-outcome labels to the actual proposal, execution and provider/effect evidence. Missing
-labels remain unknown; a novel action is not automatically classified as unsafe.
+Use this protocol to assess whether an application completed its authorized task while
+preventing prohibited effects and data release. TraceGuard validates a frozen protocol
+and analyzes externally supplied outcomes. It does not run models, plan actions or
+supply a native external benchmark runner.
 
-The application or external evaluation runner supplies complete trace-bound outcomes.
-This package validates a frozen protocol and analyzes those records; it does not execute
-models or plan agent actions. Task-family clustering keeps repeated seeds within the same
-independent unit and gives families equal weight in paired uncertainty.
+## Define the comparison before running it
 
-Before a held-out comparison with CaMeL/Progent or a strict/hybrid study, freeze a protocol:
+Freeze compatible tasks, attacks, models, privileges and budgets. The protocol pins
+source commits for datasets, arms and evaluators; model settings; executor contract
+digests; an explicit baseline; task-to-family mapping; declared disjoint development
+families; seeds; adaptive-query budgets; tool calls and model tokens.
+
+For a deterministic/hybrid comparison or an external CaMeL/Progent comparison, first
+check that execution privileges and outcome evaluators are compatible. A different
+model, task budget or effect boundary can invalidate the comparison.
 
 ```bash
-python -m traceguard.validation.security_evaluation --output artifacts/study/protocol.json freeze \
-  --config configs/my-study.json
-python -m traceguard.validation.security_evaluation --output artifacts/study/report.json analyze \
+python -m traceguard.validation.security_evaluation \
+  --output artifacts/study/protocol.json freeze --config configs/my-study.json
+```
+
+Supply your study configuration; `configs/my-study.json` is an application-owned input,
+not a bundled benchmark. Generate input schemas with `Protocol.model_json_schema()`
+and `Outcome.model_json_schema()` from `traceguard.validation.security_evaluation`.
+Commit the frozen protocol before final runs and preserve it independently.
+
+## Collect complete effect evidence
+
+For every arm/task/seed, record the proposal, dispatch status, result-release decision,
+actual effect evidence, budgets, cost and latency. Include failures, outages and
+escalations. Outcomes must match the frozen configuration and reference hash-verifiable
+trace and effect-evidence files.
+
+A withheld result does not prove prevention: an effect may have occurred before output
+was blocked. Post-dispatch failures remain unknown and cannot count as secure completion.
+Missing labels remain unknown; novel actions are not automatically unsafe. Independent
+labels must refer to actual effects, not a model's self-assessment.
+
+## Analyze the frozen records
+
+```bash
+python -m traceguard.validation.security_evaluation \
+  --output artifacts/study/report.json analyze \
   --protocol artifacts/study/protocol.json --results artifacts/study/outcomes.jsonl
 ```
 
-The protocol schema pins dataset/arm/evaluator source commits, model settings and executor
-contract digests, explicit baseline, task-to-family mapping, disjoint declared development
-families, seeds, adaptive-query budget, tool calls and model tokens. Commit the frozen file
-before final runs and preserve it externally. Every arm/task/seed outcome is required;
-failed/outage/escalated episodes cannot be omitted. Outcomes must match the configuration
-and resource budgets and reference hash-verified trace and effect-evidence files. Analysis
-reports secure completion, protected releases, unknown effects, review workload and actual
-cost/latency, with family-clustered paired uncertainty. Unknown effects cannot count as
-secure completion. No protocol/result is silently overwritten.
+Analysis checks completeness, configuration/budget consistency and evidence hashes.
+It reports secure completion, protected releases, unknown effects, review workload and
+actual cost/latency. Paired uncertainty clusters repeated seeds within task families
+and weights families equally. Existing protocol/report files are not silently overwritten.
 
-Use `Protocol.model_json_schema()` and `Outcome.model_json_schema()` from
-`traceguard.validation.security_evaluation` to generate input schemas. Tests use synthetic records
-solely to validate accounting and rejection paths; they are not new efficacy measurements.
+## Interpret the result within its scope
 
-The tool checks consistency, completeness and evidence binding. It does not certify the
-truth of submitted outcome labels, independence of the held-out families, equivalence of
-external executor integrations or the quality of adaptive attackers. Those require native
-effect evaluators, frozen code/configuration and independent review. Synthetic unit fixtures must not be relabelled as an upstream reproduction, efficacy
-measurement or superiority result.
+The analyzer cannot establish label truth, independence of held-out families, equivalence
+of external executor integrations or adaptive attacker quality. Those require native
+effect evaluators, frozen code/configuration and independent assessment. Synthetic test
+records validate accounting and rejection paths; they are not efficacy measurements,
+upstream reproductions or evidence of superiority.
 
-External work still required: select compatible native tasks/attacks and baseline commits,
-arrange independent held-out/adaptive evaluation, run paid providers only with an approved
-budget, and conduct two real application pilots. No such pilots or reviewers are currently
-arranged. The local mTLS/Docker integration canaries are separate engineering evidence.
+External held-out/adaptive evaluation and two real application pilots remain
+[release requirements](release_assurance.md). No reviewers or pilots are currently
+arranged. Paid provider runs need an approved budget. Local mTLS/Docker canaries remain
+separate engineering evidence.
